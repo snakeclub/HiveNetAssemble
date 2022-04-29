@@ -1,0 +1,7 @@
+Standards
+==========
+
+.. toctree::
+   :glob:
+   
+   standards/*
