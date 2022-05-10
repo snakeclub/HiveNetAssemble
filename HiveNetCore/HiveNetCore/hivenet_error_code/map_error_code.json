@@ -34,6 +34,7 @@
     "1402": "service stop failure - service have been shutdown",
     "1403": "service name \"[$1]\" is not existed",
     "1404": "unsupport command \"[$1]\"",
+    "1405": "service name \"[$1]\" is existed",
     "1599": "other application failure",
     "3001": "[$1] is existed",
     "3002": "[$1] is not existed",

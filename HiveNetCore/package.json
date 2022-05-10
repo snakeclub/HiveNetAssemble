@@ -1,6 +1,6 @@
 {
     "name": "HiveNetCore",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Provides the most commonly used basic objects and basic tool classes",
     "main": "index.js",
     "scripts": {

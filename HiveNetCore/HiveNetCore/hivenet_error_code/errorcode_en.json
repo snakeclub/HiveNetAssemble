@@ -31,6 +31,7 @@
   "[$1] is existed": "[$1] is existed",
   "[$1] is not existed": "[$1] is not existed",
   "service name \"[$1]\" is not existed": "service name \"[$1]\" is not existed",
+  "service name \"[$1]\" is existed": "service name \"[$1]\" is existed",
   "execute raise exception, type \"[$1]\"": "execute raise exception, type \"[$1]\"",
   "grpc call failure,  status code: [$1], details: [$2]": "grpc call failure,  status code: [$1], details: [$2]",
   "remote function execute raise exception, type \"[$1]\"": "remote function execute raise exception, type \"[$1]\"",

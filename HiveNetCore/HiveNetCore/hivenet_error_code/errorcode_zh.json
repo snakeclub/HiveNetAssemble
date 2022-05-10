@@ -17,6 +17,7 @@
     "other database failure": "数据库处理其他失败",
     "service start failure - service have been started": "服务启动失败-服务已启动",
     "service stop failure - service have been shutdown": "服务停止失败-服务已关闭",
+    "service name \"[$1]\" is existed": "服务名\"[$1]\"已存在",
     "other application failure": "应用服务处理其他失败",
     "other system failure": "其他系统失败",
     "other network unknow result": "网络连接其他未知结果",
