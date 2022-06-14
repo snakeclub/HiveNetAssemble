@@ -24,7 +24,7 @@ SHORT_DESCRIPTION = """
 Simplifies the complexity of building restful API based on Sanic.""".strip()
 
 DEPENDENCIES = [
-    'HiveNetCore'
+    'HiveNetCore>=0.1.2',
     'HiveNetWebUtils',
     'sanic',
     'sanic-ext'
@@ -32,7 +32,7 @@ DEPENDENCIES = [
 
 TEST_DEPENDENCIES = []
 
-VERSION = '0.1.0'
+VERSION = '0.1.2'
 URL = 'https://github.com/snakeclub/HiveNetAssemble/HiveNetSimpleSanic'
 
 setup(

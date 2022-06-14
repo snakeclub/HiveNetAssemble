@@ -15,7 +15,7 @@ import unittest
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 from HiveNetCore.generic import CResult
 from HiveNetCore.utils.exception_tool import ExceptionTool
-from HiveNetCore.logging import Logger
+from HiveNetCore.logging_hivenet import Logger
 
 
 class TestExcepitonTool(unittest.TestCase):
@@ -52,8 +52,7 @@ class TestExcepitonTool(unittest.TestCase):
         ):
             _result.test = 'test'
 
-        self.assertTrue(_result.code ==
-                        '00000' and _result.test == 'test', 'ok result error')
+        self.assertTrue(_result.code == '00000' and _result.test == 'test', 'ok result error')
 
         _result = CResult('00000')
         with ExceptionTool.ignored_cresult(

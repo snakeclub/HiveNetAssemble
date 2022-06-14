@@ -103,7 +103,7 @@ class AuthBaseFw(object):
         @param {kwargs} - 执行函数的kv入参
 
         @returns {tuple} - 返回校验结果数组: (校验是否通过true/false, 错误码, 失败描述)
-            注: 错误吗由实现类自行定义
+            注: 错误码由实现类自行定义
         """
         raise NotImplementedError()
 

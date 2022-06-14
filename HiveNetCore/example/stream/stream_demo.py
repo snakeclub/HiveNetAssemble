@@ -14,7 +14,7 @@ sys.path.append(os.path.abspath(os.path.join(
     os.path.dirname(__file__), os.path.pardir, os.path.pardir
 )))
 from HiveNetCore.utils.string_tool import StringTool
-from HiveNetCore.logging import EnumLoggerName, Logger, EnumLoggerConfigType
+from HiveNetCore.logging_hivenet import EnumLoggerName, Logger, EnumLoggerConfigType
 from HiveNetCore.stream import StringStream
 
 

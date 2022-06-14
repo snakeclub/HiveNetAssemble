@@ -30,7 +30,8 @@ DEPENDENCIES = [
     'dicttoxml>=1.7.4',
     'lxml',
     'elementpath',
-    'nest_asyncio'
+    'nest_asyncio',
+    'requests'
 ]
 
 if sys.platform == 'win32':
@@ -38,7 +39,7 @@ if sys.platform == 'win32':
 
 TEST_DEPENDENCIES = []
 
-VERSION = '0.1.1'
+VERSION = '0.1.2'
 URL = 'https://github.com/snakeclub/HiveNetAssemble/HiveNetCore'
 
 setup(

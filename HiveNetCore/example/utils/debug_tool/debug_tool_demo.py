@@ -8,7 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(
 )))
 from HiveNetCore.utils.debug_tool import DebugTool
 from HiveNetCore.utils.exception_tool import ExceptionTool
-import HiveNetCore.logging as simple_log
+import HiveNetCore.logging_hivenet as simple_log
 from debug_tool_demo_not_run import test_debugtools
 
 

@@ -14,12 +14,18 @@
 @file string_tool.py
 
 """
-
+import os
+import sys
 import json
 import re
+from typing import Any
 from random import Random
 import dicttoxml
 from lxml import etree
+# 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
+sys.path.append(os.path.abspath(os.path.join(
+    os.path.dirname(__file__), os.path.pardir, os.path.pardir)))
+from HiveNetCore.generic import CResult, NullObj
 
 
 __MOUDLE__ = 'string_tool'  # 模块名
@@ -27,6 +33,70 @@ __DESCRIPT__ = u'字符串处理模块'  # 模块描述
 __VERSION__ = '0.1.0'  # 版本
 __AUTHOR__ = u'黎慧剑'  # 作者
 __PUBLISH__ = '2018.08.29'  # 发布日期
+
+
+class JsonHiveNetEncoder(json.JSONEncoder):
+    """
+    支持对bytes对象转换为json字符串的Json编码器
+    """
+    def default(self, o: Any) -> Any:
+        if isinstance(o, bytes):
+            # 字节数组的转换支持
+            return {
+                "__extend_type__": "bytes",
+                "value": o.hex()
+            }
+        elif isinstance(o, CResult):
+            # 对CResult的支持
+            return {
+                "__extend_type__": "CResult",
+                "value": NullObj.get_object_attr_dict(o, ignored_key=['_i18n_obj', ])
+            }
+        else:
+            # 其他情况使用默认处理
+            return super().default(o)
+
+
+class JsonHiveNetDecoder(json.JSONDecoder):
+    """
+    支持将bytes编码的json字符串转换回bytes数组
+    """
+
+    def __init__(self):
+        json.JSONDecoder.__init__(self, object_hook=JsonHiveNetDecoder.extend_dict)
+
+    @staticmethod
+    def extend_dict(d: dict) -> Any:
+        """
+        处理扩展类型的字典解码
+
+        @param {dict} d - 扩展类型字典
+
+        @returns {Any} - 返回真实对象
+        """
+        if type(d) == dict:
+            _extend_type = d.get('__extend_type__', None)
+            if _extend_type == 'bytes':
+                return bytes.fromhex(d['value'])
+            elif _extend_type == 'CResult':
+                _value = d['value']
+                # 初始化对象
+                _ret = CResult(
+                    code=_value.pop('code', '00000'),
+                    msg=_value.pop('msg', None),
+                    error=_value.pop('error', ''),
+                    trace_str=_value.pop('trace_str', ''),
+                    i18n_msg_paras=_value.pop('i18n_msg_paras', ())
+                )
+                # 附加值
+                for _name, _val in _value.items():
+                    setattr(_ret, _name, _val)
+
+                return _ret
+            else:
+                return d
+        else:
+            return d
 
 
 class StringTool(object):
@@ -60,6 +130,46 @@ class StringTool(object):
             return '<'
         else:
             return '='
+
+    #############################
+    # 变量名处理
+    #############################
+    @classmethod
+    def pascal_case_to_snake_case(cls, camel_case: str) -> str:
+        """
+        驼峰(帕斯卡)变量命名转蛇形
+        (支持大小驼峰模式)
+
+        @param {str} camel_case - 驼峰(帕斯卡)变量名形式(MyVarName或myVarName)
+
+        @returns {str} - 转换后的蛇形变量名(my_var_name)
+        """
+        snake_case = re.sub(r"(?P<key>[A-Z])", r"_\g<key>", camel_case)
+        return snake_case.lower().strip('_')
+
+    @classmethod
+    def snake_case_to_big_pascal_case(cls, snake_case: str) -> str:
+        """
+        蛇形变量名转大驼峰(帕斯卡)
+
+        @param {str} snake_case - 蛇形变量名(my_var_name)
+
+        @returns {str} - 大驼峰(帕斯卡)变量名形式(MyVarName)
+        """
+        words = snake_case.split('_')
+        return ''.join(word.title() for word in words)
+
+    @classmethod
+    def snake_case_to_little_pascal_case(cls, snake_case: str) -> str:
+        """
+        蛇形变量名转小驼峰(帕斯卡)
+
+        @param {str} snake_case - 蛇形变量名(my_var_name)
+
+        @returns {str} - 小驼峰(帕斯卡)变量名形式(myVarName)
+        """
+        words = snake_case.split('_')
+        return '%s%s' % (words[0], ''.join(word.title() for word in words[1:]))
 
     #############################
     # 哈希转换
@@ -107,7 +217,7 @@ class StringTool(object):
         @param {string} fill_char - 填充字符(单字符)
         @param {bool} left=True - 填充方向, True-左填充, False-右填充
 
-        @returns {string} - 如果原字符串长度已超过指定长度, 则直接返回原字符串；否则返回处理后的字符串
+        @returns {string} - 如果原字符串长度已超过指定长度, 则直接返回原字符串; 否则返回处理后的字符串
 
         @example
             fix_str = StringTool.fill_fix_string('My job is', 50, ' ', False)
@@ -348,9 +458,46 @@ class StringTool(object):
     # JSON相关
     #############################
     @staticmethod
+    def json_dumps_hive_net(obj: Any, *, skipkeys=False, ensure_ascii=True, check_circular=True,
+            allow_nan=True, indent=None, separators=None,
+            default=None, sort_keys=False, **kw) -> str:
+        """
+        将对象转换为json字符串(支持bytes数组及CResult)
+
+        @param {Any} obj - 要处理的对象
+        @param {kwargs} - json.dumps的其他入参
+
+        @returns {str} - json字符串
+        """
+        # 增加对字节数组编码的支持
+        return json.dumps(
+            obj, skipkeys=skipkeys, ensure_ascii=ensure_ascii, check_circular=check_circular,
+            allow_nan=allow_nan, cls=JsonHiveNetEncoder, indent=indent, separators=separators,
+            default=default, sort_keys=sort_keys, **kw
+        )
+
+    @staticmethod
+    def json_loads_hive_net(s, *, object_hook=None, parse_float=None,
+            parse_int=None, parse_constant=None, object_pairs_hook=None, **kw) -> Any:
+        """
+        将json转换为Python对象(支持bytes数组及CResult)
+
+        @param {str|bytes} s - 要转换的字符串或字节数组
+        @param {kwargs} - json.loads的其他入参
+
+        @returns {Any} - 转换后的python对象
+        """
+        # 增加对字节数组解码的支持
+        return json.loads(
+            s, cls=JsonHiveNetDecoder, object_hook=object_hook, parse_float=parse_float, parse_int=parse_int,
+            parse_constant=parse_constant, object_pairs_hook=object_pairs_hook,
+            **kw
+        )
+
+    @staticmethod
     def object_to_json(obj):
         """
-        将python对象转换为json字符串( 支持所有对象的通用转换)
+        将python对象转换为json字符串(支持所有对象的通用转换)
 
         @param {object} obj - 要转换的json
 
@@ -359,7 +506,7 @@ class StringTool(object):
         @see 处理方式:
             1、如果对象包含__json__方法, 则直接调用对象的该方法进行转换
             2、尝试通过json库标准方法进行转换
-            3、如果对象不支持序列化, 转换会出现异常；如果对象包含__dict__, 则将__dict__转换为json
+            3、如果对象不支持序列化, 转换会出现异常; 如果对象包含__dict__, 则将__dict__转换为json
             4、如果都失败, 则抛出异常
         """
         _json_str = None
@@ -379,7 +526,7 @@ class StringTool(object):
     @staticmethod
     def json_to_object(json_str, class_ref=None, object_hook=None):
         """
-        将json字符串转换为python对象( 支持自定义转换)
+        将json字符串转换为python对象(支持自定义转换)
 
         @param {string} json_str - 要转换的json字符串
         @param {class} class_ref=None - 类定义引用, 例如generic.NullObj

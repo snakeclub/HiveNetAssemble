@@ -38,7 +38,6 @@ class EnumFormulaSearchSortOrder(Enum):
     检索结果排序模式
 
     @enum {string}
-
     """
     ListAsc = 'ListAsc'  # 按匹配清单顺序
     ListDesc = 'ListDesc'  # 按匹配清单降序
@@ -53,7 +52,6 @@ class EnumFormulaSearchResultType(Enum):
     检索结果类型
 
     @enum {string}
-
     """
     Dict = 'Dict'  # 按匹配字符串索引的字典形式
     List = 'List'  # 按匹配顺序排序的数组形式
@@ -62,7 +60,6 @@ class EnumFormulaSearchResultType(Enum):
 class StructFormulaKeywordPara(object):
     """
     公式匹配关键字配置参数结构定义
-
     """
     is_single_tag = False  # 该标签是否单独一个标识, 不含公式内容
     has_sub_formula = True  # 是否包含子公式, 如果为True则代表继续分解公式里面的子公式
@@ -103,11 +100,11 @@ class FormulaTool(object):
                     \* : 匹配任意字符(也可以是前面无字符)
                 如果前置字符/后置字符列表长度为0, 则代表不判断前置及后置字符, 等同于'\*'
         match_info - {object} - 某一匹配节点信息, 为一个object:
-                object.source_str : string 匹配到的原文字符串
-                object.start_pos : int 匹配结果开始位置(不含前置字符)
-                object.end_pos : int 匹配结果结束位置(不含后置字符)
-                object.front_char : string 匹配到的前置字符
-                object.end_char : string 匹配到的后置字符
+            object.source_str : string 匹配到的原文字符串
+            object.start_pos : int 匹配结果开始位置(不含前置字符)
+            object.end_pos : int 匹配结果结束位置(不含后置字符)
+            object.front_char : string 匹配到的前置字符
+            object.end_char : string 匹配到的后置字符
         match_result - {dict} - 匹配结果字典, 格式为:
             key - string, 匹配上的字符串(match_list的key)
             value - dict, 匹配到的结果字典, key为start_pos, value为match_info, 格式 @see FormulaTool/match_info
@@ -129,7 +126,6 @@ class FormulaTool(object):
                     object.end_tags : list 当结束标签为None时, 且不是单独标签, 通过该参数获取结束标识(可以为多个字符):
                         \$ : 以结尾为结束标签'\\$'
                         \t : 以下一个标签开始为当前结束标签'\\t', 注意不是代表tab的'\t'
-
     @param {dict} keywords=dict() - 公式关键字定义,  @see FormulaTool/keywords
     @param {bool} ignore_case=False - 是否忽略大小写
     @param {dict} deal_fun_list=dict() - 公式计算函数对照字典:
@@ -145,7 +141,6 @@ class FormulaTool(object):
                 2、如果希望传入的指定参数能在公式处理过程中被修改并传递到其他公式处理, 应该指定的参数类型不要:
                     为string、int等非引用类型, 而应该使用list、dict、object等引用类型
     @param {function} default_deal_fun=None - 默认的公式处理函数, 如果None代表默认使用default_deal_fun_string_content
-
     """
 
     #############################

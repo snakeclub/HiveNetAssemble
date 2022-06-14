@@ -1,6 +1,6 @@
 {
     "name": "HiveNetWebUtils",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "description": "Provides common web service abstract classes and tool classes",
     "main": "index.js",
     "scripts": {

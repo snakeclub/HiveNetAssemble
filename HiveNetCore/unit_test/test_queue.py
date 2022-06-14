@@ -11,9 +11,9 @@ import os
 import sys
 import unittest
 from queue import Full, Empty
-# 根据当前文件路径将包路径纳入，在非安装的情况下可以引用到
+# 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
-from HiveNetCore.queue import MemoryQueue, EnumQueueType
+from HiveNetCore.queue_hivenet import MemoryQueue, EnumQueueType
 
 
 __MOUDLE__ = 'test_queue'  # 模块名
@@ -52,16 +52,16 @@ class TestMemoryQueue(unittest.TestCase):
 
         # 插入失败 - 抛出异常
         try:
-            print('队列已满，插入等待2秒后超时')
+            print('队列已满, 插入等待2秒后超时')
             queue.put(4, timeout=2)
         except Full:
             print('正常超时返回')
         except:
             self.assertTrue(False, '测试先进先出 - 非水桶模式 - 放入对象超时失败-出现其他异常')
 
-        # 插入失败，直接返回
+        # 插入失败, 直接返回
         try:
-            print('队列已满，插入不等待异常')
+            print('队列已满, 插入不等待异常')
             queue.put(4, block=False)
         except Full:
             print('正常异常返回')
@@ -77,16 +77,16 @@ class TestMemoryQueue(unittest.TestCase):
 
         # 空的情况取数据超时
         try:
-            print('队列已空，获取等待2秒后超时')
+            print('队列已空, 获取等待2秒后超时')
             queue.get(timeout=2)
         except Empty:
             print('正常超时返回')
         except:
             self.assertTrue(False, '测试先进先出 - 非水桶模式 - 获取对象超时失败-出现其他异常')
 
-        # 获取失败，直接返回
+        # 获取失败, 直接返回
         try:
-            print('队列已空，获取不等待异常')
+            print('队列已空, 获取不等待异常')
             queue.get(block=False)
         except Empty:
             print('正常异常返回')

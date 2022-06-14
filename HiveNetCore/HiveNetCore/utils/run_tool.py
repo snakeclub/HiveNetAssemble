@@ -14,9 +14,8 @@
 @file run_tool.py
 
 """
-
-import sys
 import os
+import sys
 import inspect
 import ctypes
 import subprocess
@@ -25,7 +24,7 @@ import logging
 import platform
 from contextlib import contextmanager
 import asyncio
-from inspect import isawaitable
+from inspect import isasyncgen, isawaitable, isgenerator
 from typing import Any
 try:
     from gevent import sleep
@@ -1093,6 +1092,26 @@ class AsyncTools(object):
             # 异步迭代
             async for _item in async_iter_obj:
                 func(_item, *args, **kwargs)
+
+    @classmethod
+    def sync_for_async_iter(cls, async_iter_obj):
+        """
+        将异步迭代器转为同步迭代器
+
+        @param {AsyncGenerator|Iterator} AsyncGenerator - 要处理的迭代器对象
+        """
+        if not isasyncgen(async_iter_obj):
+            # 普通的迭代
+            for _item in async_iter_obj:
+                yield _item
+        else:
+            # 异步迭代
+            try:
+                while True:
+                    yield cls.sync_run_coroutine(async_iter_obj.__anext__())
+            except StopAsyncIteration:
+                # 关闭迭代器
+                cls.sync_run_coroutine(async_iter_obj.aclose())
 
 
 if __name__ == '__main__':

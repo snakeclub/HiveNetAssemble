@@ -8,7 +8,7 @@ import datetime
 sys.path.append(os.path.abspath(os.path.join(
     os.path.dirname(__file__), os.path.pardir, os.path.pardir
 )))
-import HiveNetCore.logging as simple_log
+import HiveNetCore.logging_hivenet as simple_log
 
 __MOUDLE__ = 'simple_log_queue_demo'  # 模块名
 __DESCRIPT__ = u'simple的队列方式示例代码'  # 模块描述
@@ -51,7 +51,7 @@ _LOGGER_QUEUE_MSG_JSON_STR = u'''{
         },
 
         "QueueMsgHandler": {
-            "class": "HiveNetCore.logging.QueueHandler",
+            "class": "HiveNetCore.logging_hivenet.QueueHandler",
             "level": "DEBUG",
             "formatter": "simpleFormatter",
             "queue": "",
@@ -61,7 +61,7 @@ _LOGGER_QUEUE_MSG_JSON_STR = u'''{
         },
 
         "QueueRecordHandler": {
-            "class": "HiveNetCore.logging.QueueHandler",
+            "class": "HiveNetCore.logging_hivenet.QueueHandler",
             "level": "DEBUG",
             "formatter": "simpleFormatter",
             "queue": "",

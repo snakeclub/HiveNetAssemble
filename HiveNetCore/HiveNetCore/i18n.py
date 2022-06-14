@@ -131,7 +131,6 @@ class SimpleI18N(object):
         }
 
         @property {dict}
-
         """
         return self.__trans_dict
 

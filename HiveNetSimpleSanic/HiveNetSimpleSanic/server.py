@@ -21,10 +21,9 @@ import inspect
 from functools import wraps
 import traceback
 from typing import Callable
-from inspect import isawaitable
-from collections import OrderedDict
+from inspect import isasyncgen, isawaitable, isgenerator
 from sanic import Sanic
-from sanic.response import HTTPResponse, text, json
+from sanic.response import HTTPResponse, text, json, stream
 from sanic_ext import Extend
 from HiveNetCore.generic import CResult
 from HiveNetCore.i18n import _
@@ -51,7 +50,7 @@ class SanicTool(object):
         @param {function} func - 要添加路由的函数
         @param {str} name=None - 路由标识, 如果不传默认使用函数名(会存在函数名相同导致异常的情况)
         @param {bool} with_para=False - 路由是否根据函数添加入参
-        @param {list} methods=None - 指定路由支持的方法, 如果不传代表支持所有方法
+        @param {list} methods=None - 指定路由支持的方法, 如果不传且with_para为True时, 将获取路由函数本身带的'methods'参数定义
         @param {int|float|str} version=None - 指定路由的版本, 则路由变为"/v{version}/url"
         """
         _route = url if url == '/' else url.rstrip('/')  # 去掉最后的'/'
@@ -66,7 +65,8 @@ class SanicTool(object):
             for _para in _para_list:
                 if _para['name'] == 'methods':
                     # 指定了处理方法
-                    _methods = _para['default']
+                    if _methods is None:
+                        _methods = _para['default']
                 elif _para['name'] in ('self', 'cls', 'request'):
                     # 不处理 self 和 cls 入参, 以及第一个请求的入参
                     continue
@@ -169,7 +169,7 @@ class SanicTool(object):
         支持函数直接返回Python对象的修饰符
         注: 正常函数应该返回标准的sanic.response.HTTPResponse对象, 本修饰符允许按以下方式返回
             1、返回sanic.response.HTTPResponse对象
-            2、返回二元数组, 其中第1个为要返回的内容对象, 第2个为状态码
+            2、返回三元数组, 其中第1个为要返回的内容对象, 第2个为状态码, 第3个是header字典
             3、直接返回要处理的对象, 状态码默认为200(注意不可直接将数组对象返回)
 
         @param {function} func - 修饰符处理的函数
@@ -188,20 +188,38 @@ class SanicTool(object):
                 return _ret
             else:
                 _status = 200
+                _header = {}
                 if isinstance(_ret, (tuple, list)):
-                    # 是列表, 第1个是要返回的值, 第2个是http状态码
+                    # 是列表, 第1个是要返回的值, 第2个是http状态码, 第3个是header字典
                     _body = _ret[0]
                     if len(_ret) > 1:
                         _status = _ret[1]
+                    if len(_ret) > 2:
+                        _header = _ret[2]
                 else:
                     _body = _ret
 
-                if isinstance(_body, str):
+                _type = type(_body)
+                if _type == str:
                     # 字符串
-                    return text(_body, status=_status)
+                    return text(_body, status=_status, headers=_header)
+                elif _type == bytes:
+                    # 二进制数组
+                    async def body_async_iter(body):
+                        yield body
+                    return stream(
+                        body_async_iter(_body), status=_status, headers=_header,
+                        content_type='application/octet-stream'
+                    )
+                elif isasyncgen(_body) or isgenerator(_body):
+                    # 迭代器, 二进制流
+                    return stream(
+                        _body, status=_status, headers=_header,
+                        content_type='application/octet-stream'
+                    )
                 else:
                     # 对象
-                    return json(_body, status=_status)
+                    return json(_body, status=_status, headers=_header)
         return wrapper
 
 
@@ -462,10 +480,14 @@ class SanicServer(ServerBaseFW):
 
         @param {str} service_uri - 服务唯一标识, 例如'/demo'
         @param {Callable} handler - 请求处理函数, 应可同时支持同步或异步函数
-            注: 由实现类自定义请求函数的要求
+            函数定义如下:
+            func(request, *args) -> sanic.response.HTTPResponse
+            其中第一个参数request固定为sanic.request.Request对象
+            *args定义适配sanic路由uri配置的<xxx>形式的路由参数(例如/xx/<arg1>/<arg2>), 注意只支持固定位置参数, 不支持kwargs
+            返回值必须为HTTPResponse对象, 可以使用sanic.response的text和json函数进行转换
         @param {str} name=None - 路由标识, 如果不传默认使用函数名(会存在函数名相同导致异常的情况)
         @param {bool} with_para=False - 路由是否根据函数添加入参
-        @param {list} methods=None - 指定路由支持的方法, 如果不传代表支持所有方法
+        @param {list} methods=None - 指定路由支持的方法, 如果不传且with_para为True时, 将获取路由函数本身带的'methods'参数定义
         @param {int|float|str} version=None - 指定路由的版本, 则路由变为"/v{version}/url"
         @param {kwargs}  - 自定义扩展参数
 
@@ -490,7 +512,7 @@ class SanicServer(ServerBaseFW):
         @param {str} service_uri - 服务唯一标识, 例如服务名或url路由
         @param {kwargs}  - 实现类的自定义扩展参数
 
-        @returns {CResult} - 添加服务结果, result.code: '00000'-成功, '1404'-不支持的命令, 其他-异常
+        @returns {CResult} - 删除服务结果, result.code: '00000'-成功, '1404'-不支持的命令, 其他-异常
         """
         return CResult(code='21404', i18n_msg_paras=('remove_service', ))
 

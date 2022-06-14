@@ -24,7 +24,8 @@ SHORT_DESCRIPTION = """
 Provides common web service abstract classes and tool classes.""".strip()
 
 DEPENDENCIES = [
-    'HiveNetCore'
+    'HiveNetCore>=0.1.2',
+    'lxml'
 ]
 
 if sys.platform == 'win32':
@@ -35,7 +36,7 @@ else:
 
 TEST_DEPENDENCIES = []
 
-VERSION = '0.1.0'
+VERSION = '0.1.1'
 URL = 'https://github.com/snakeclub/HiveNetAssemble/HiveNetWebUtils'
 
 setup(

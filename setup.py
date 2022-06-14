@@ -24,7 +24,15 @@ SHORT_DESCRIPTION = """
 A collection of Python libraries that are easy for developers to use.""".strip()
 
 DEPENDENCIES = [
-    'HiveNetCore'
+    'HiveNetCore==0.1.2',
+    'HiveNetWebUtils==0.1.1',
+    'HiveNetSimpleSanic==0.1.2',
+    'HiveNetSimpleFlask==0.1.0',
+    'HiveNetGRpc==0.1.0',
+    'HiveNetPipeline==0.1.0',
+    'HiveNetPromptPlus==0.1.0',
+    'HiveNetConsole==0.1.0',
+    'HiveNetFileTransfer==0.1.0'
 ]
 
 TEST_DEPENDENCIES = []
@@ -54,7 +62,7 @@ setup(
     classifiers=[
         'Operating System :: OS Independent',
         'License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)',
-        'Programming Language :: Python :: 3.6+',
+        'Programming Language :: Python :: 3.6',
         'Topic :: Software Development :: Libraries'
     ],
     # 此项需要, 否则卸载时报windows error

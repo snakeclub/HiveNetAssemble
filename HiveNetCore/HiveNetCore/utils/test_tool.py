@@ -65,9 +65,15 @@ class TestTool(object):
                     is_sub_same = True
                     if type(src_data[i]) == list:
                         # 针对有子列表的情况, 递归处理
-                        is_sub_same = TestTool.cmp_list(
-                            src_data[i], dst_data[i], print_if_diff=False)
+                        is_sub_same = cls.cmp_list(
+                            src_data[i], dst_data[i], print_if_diff=False
+                        )
                         # print('list is_sub_same:'+str(is_sub_same) + str(i))
+                    elif type(src_data[i]) == dict:
+                        # 值为dict的情况
+                        is_sub_same = cls.cmp_dict(
+                            src_data[i], dst_data[i], list_sorted=sorted, print_if_diff=False
+                        )
                     else:
                         is_sub_same = (src_data[i] == dst_data[i])
                         # print('obj is_sub_same:'+str(is_sub_same) + str(i))
@@ -85,12 +91,13 @@ class TestTool(object):
         return is_same
 
     @classmethod
-    def cmp_dict(cls, src_data, dst_data, print_if_diff=True):
+    def cmp_dict(cls, src_data, dst_data, list_sorted: bool = False, print_if_diff=True):
         """
         比较两个字典是否一致
 
         @param {string/dict} src_data - 第1个字典对象( 或对象JSON字符串)
         @param {string/dict} dst_data - 第2个字典对象( 或对象JSON字符串)
+        @param {bool} list_sorted=False - 值为列表时先排序再比较
         @param {bool} print_if_diff=True - 当两个字典不一致时是否打印对象信息
 
         @returns {bool} - True-两个字典一致, False-两个字典不一致
@@ -112,11 +119,26 @@ class TestTool(object):
             if operator.eq(src_key, dst_key):
                 is_break = False
                 for key in src_data.keys():
-                    if src_data[key] != dst_data[key]:
-                        # print(src_data1[key])
-                        print('cmp_dict: value difference in key "%s"!' % (key))
-                        is_break = True
-                        break
+                    if type(src_data[key]) == dict:
+                        # 值是字典, 递归判断
+                        if not cls.cmp_dict(src_data[key], dst_data[key], list_sorted=list_sorted, print_if_diff=False):
+                            print('cmp_dict: value difference in key "%s"!' % (key))
+                            is_break = True
+                            break
+                    elif type(src_data[key]) == list:
+                        # 值是列表
+                        if not cls.cmp_list(src_data[key], dst_data[key], sorted=list_sorted, print_if_diff=False):
+                            print('cmp_dict: value difference in key "%s"!' % (key))
+                            is_break = True
+                            break
+                    else:
+                        # 一般值
+                        if src_data[key] != dst_data[key]:
+                            # print(src_data1[key])
+                            print('cmp_dict: value difference in key "%s"!' % (key))
+                            is_break = True
+                            break
+
                 if not is_break:
                     # 如果没有中断过, 则代表比较成功
                     return True

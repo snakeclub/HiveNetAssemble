@@ -7,7 +7,7 @@ sys.path.append(os.path.abspath(os.path.join(
     os.path.dirname(__file__), os.path.pardir, os.path.pardir
 )))
 from HiveNetCore.utils.file_tool import FileTool
-import HiveNetCore.logging as simple_log
+import HiveNetCore.logging_hivenet as simple_log
 
 __MOUDLE__ = 'simple_log_demo'  # 模块名
 __DESCRIPT__ = u'simple示例代码'  # 模块描述

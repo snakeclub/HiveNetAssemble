@@ -14,7 +14,7 @@ import multiprocessing
 sys.path.append(os.path.abspath(os.path.join(
     os.path.dirname(__file__), os.path.pardir, os.path.pardir
 )))
-from HiveNetCore.logging import EnumLoggerName, Logger, EnumLoggerConfigType
+from HiveNetCore.logging_hivenet import EnumLoggerName, Logger, EnumLoggerConfigType
 from HiveNetCore.parallel import ThreadParallel, ProcessParallel, ProcessParallelShareDict, ProcessParallelLock, ParallelPool
 from HiveNetCore.utils.import_tool import ImportTool
 
@@ -86,7 +86,7 @@ def demo2():
         deal_fun=demo_deal_fun, run_args=('demo2-a-1', 'demo2-b-1', 'demo2-c-1'),
         run_kwargs={'p1': 'demo2-p1-1', 'p2': 'demo2-p2-1'}, pid='demo2-t1', pname='demo2-t1-name',
         callback_fun=demo_callback, set_daemon=True, logger=_logger,
-        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging',
+        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging_hivenet',
         distributed_logger_class_name='Logger',
         distributed_logger_args=None, distributed_logger_kwargs=_logger_kwargs
     )
@@ -95,7 +95,7 @@ def demo2():
         deal_fun=demo_deal_fun, run_args=('demo2-a-2', 'demo2-b-2', 'demo2-c-2'),
         run_kwargs={'p1': 'demo2-p1-2', 'p2': 'demo2-p2-2'}, pid='demo2-t2', pname='demo2-t2-name',
         callback_fun=demo_callback, set_daemon=True, logger=_logger,
-        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging',
+        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging_hivenet',
         distributed_logger_class_name='Logger',
         distributed_logger_args=None, distributed_logger_kwargs=_logger_kwargs
     )
@@ -131,7 +131,7 @@ def demo3():
         run_kwargs=None, pid='demo3-t1', pname='demo3-t1-name',
         lock=_lock,
         callback_fun=demo_callback, set_daemon=True, logger=_logger,
-        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging',
+        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging_hivenet',
         distributed_logger_class_name='Logger',
         distributed_logger_args=None, distributed_logger_kwargs=_logger_kwargs
     )
@@ -141,7 +141,7 @@ def demo3():
         run_kwargs=None, pid='demo3-t2', pname='demo3-t2-name',
         lock=_lock,
         callback_fun=demo_callback, set_daemon=True, logger=_logger,
-        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging',
+        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging_hivenet',
         distributed_logger_class_name='Logger',
         distributed_logger_args=None, distributed_logger_kwargs=_logger_kwargs
     )
@@ -186,7 +186,7 @@ def demo4():
         run_kwargs=None, pid='demo4-t2', pname='demo4-t2-name',
         auto_start=True,
         callback_fun=demo_callback, set_daemon=True, logger=_logger,
-        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging',
+        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging_hivenet',
         distributed_logger_class_name='Logger',
         distributed_logger_args=None, distributed_logger_kwargs=_logger_kwargs
     )
@@ -230,7 +230,7 @@ def demo5():
         run_args=(_task_queue, 'demo5-a'), run_kwargs={'p1': 'demo5-p1'},
         pname='demo5', callback_fun=demo_callback,
         logger=_logger,
-        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging',
+        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging_hivenet',
         distributed_logger_class_name='Logger',
         distributed_logger_args=None, distributed_logger_kwargs=_logger_kwargs,
         auto_start=False, auto_stop=True, task_queue=_task_queue, get_task_num_fun=None, get_task_num_fun_args=None,
@@ -270,7 +270,7 @@ def demo6():
         run_args=(_task_queue, 'demo6-a'), run_kwargs={'p1': 'demo6-p1'},
         pname='demo6', callback_fun=demo_callback,
         logger=_logger,
-        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging',
+        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging_hivenet',
         distributed_logger_class_name='Logger',
         distributed_logger_args=None, distributed_logger_kwargs=_logger_kwargs,
         auto_start=False, auto_stop=False, task_queue=_task_queue, get_task_num_fun=None, get_task_num_fun_args=None,
@@ -331,7 +331,7 @@ def demo7():
         run_args=('demo7-a', ), run_kwargs={'p1': 'demo7-p1'},
         pname='demo7', callback_fun=demo_callback,
         logger=_logger,
-        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging',
+        use_distributed_logger=True, distributed_logger_module_name='HiveNetCore.logging_hivenet',
         distributed_logger_class_name='Logger',
         distributed_logger_args=None, distributed_logger_kwargs=_logger_kwargs,
         auto_start=True, auto_stop=False, task_queue=None, get_task_num_fun=None, get_task_num_fun_args=None,

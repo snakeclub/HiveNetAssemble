@@ -127,7 +127,9 @@ class ServerBaseFW(object):
                 _auth = cls.get_auth_fun(auth_name=auth_name, app_name=app_name)
 
                 # 执行验证修饰函数
-                return _auth.auth_required_call(f, *args, **kwargs)
+                return  AsyncTools.sync_run_coroutine(
+                    _auth.auth_required_call(f, *args, **kwargs)
+                )
             return decorated
 
         if f:
@@ -147,7 +149,7 @@ class ServerBaseFW(object):
         @param {str} app_name - 服务器名称
         @param {dict} server_config={} - 服务配置字典, 由实现类自定义传值, 例如绑定主机, 端口等
         @param {dict} support_auths={} - 服务器支持的验证对象字典, key为验证对象类型名(可以为类名), value为验证对象实例对象
-            注意: 支持的auth对象必须有auth_required这个修饰符函数
+            注意: 支持的auth对象必须有auth_required_call这个函数
         @param {function} before_server_start=None - 服务器启动前执行的函数对象, 传入服务自身(self)
         @param {function} after_server_start=None - 服务器启动后执行的函数对象, 传入服务自身(self)
         @param {function} before_server_stop=None - 服务器关闭前执行的函数对象, 传入服务自身(self)
@@ -160,6 +162,12 @@ class ServerBaseFW(object):
             encoding {str} - 要加载的i18n字典文件的字符编码, 默认为'utf-8'
         @param {kwargs} - 实现类自定义扩展参数
         """
+        # 控制程序逻辑的一些特殊参数, 用来支持多种处理模式, 实现类可以自行修改参数改变框架的处理模式
+        # 启动服务模式, 支持的模式说明如下:
+        # thread - 默认, 在子线程的运行启动过程, 执行的线程函数为 _start_server_thread_fun
+        # func - 执行实现类的自有函数进行启动, 不启动线程, 直接执行_start_server_thread_fun
+        self._start_server_mode = 'thread'
+
         # 判断初始化是否成功的变量
         self._init_success = False
 
@@ -284,11 +292,16 @@ class ServerBaseFW(object):
                 # 执行启动服务的动作，通过线程方式启动
                 self._start_begin_time = datetime.datetime.now()
                 self._server_status_change(EnumServerRunStatus.WaitStart)
-                _server_thread = threading.Thread(
-                    target=self._start_server_thread_fun, args=(1,), name='Thread-Server-Main'
-                )
-                _server_thread.setDaemon(True)
-                _server_thread.start()
+                if self._start_server_mode == 'func':
+                    # func模式, 直接运行线程函数
+                    _result = self._start_server_thread_fun(1)
+                else:
+                    # thread模式
+                    _server_thread = threading.Thread(
+                        target=self._start_server_thread_fun, args=(1,), name='Thread-Server-Main'
+                    )
+                    _server_thread.setDaemon(True)
+                    _server_thread.start()
             finally:
                 # 释放锁
                 self._status_lock.release()
@@ -365,6 +378,14 @@ class ServerBaseFW(object):
             finally:
                 self._status_lock.release()
 
+            # 对于func模式, 需要通过线程执行主动处理关闭的逻辑
+            if self._start_server_mode == 'func':
+                _stop_thread = threading.Thread(
+                    target=self._func_mode_stop_thread_fun, args=(0,), name='Thread-Server-Stop-Func'
+                )
+                _stop_thread.setDaemon(True)
+                _stop_thread.start()
+
         # 等待服务关闭
         _begin_time = datetime.datetime.now()  # 记录等待开始时间
         while True:
@@ -416,7 +437,7 @@ class ServerBaseFW(object):
         @param {str} service_uri - 服务唯一标识, 例如服务名或url路由
         @param {kwargs}  - 实现类的自定义扩展参数
 
-        @returns {CResult} - 添加服务结果, result.code: '00000'-成功, '21403'-服务不存在, 其他-异常
+        @returns {CResult} - 删除服务结果, result.code: '00000'-成功, '21403'-服务不存在, 其他-异常
         """
         _result = CResult(code='00000')  # 成功
         with ExceptionTool.ignored_cresult(
@@ -490,7 +511,7 @@ class ServerBaseFW(object):
 
             # 执行真正服务初始化处理，执行通过则代表启动成功
             self._last_start_result = AsyncTools.sync_run_coroutine(self._real_server_initialize(tid))
-            if self._last_start_result.code != '00000':
+            if not self._last_start_result.is_success():
                 # 启动失败，登记了日志，修改状态为未启动，退出
                 self._logger.log(
                     logging.ERROR,
@@ -500,10 +521,9 @@ class ServerBaseFW(object):
                         _('start server error'), self._last_start_result.code, self._last_start_result.msg))
                 )
                 self._server_status_change(EnumServerRunStatus.Stop)
-                return
+                return self._last_start_result
 
             # 启动成功
-            _server_info = self._last_start_result.server_info  # 真正服务启动返回的服务器信息
             self._logger.log(
                 self._log_level,
                 '[SER-STARTED][NAME:%s][USE:%ss]%s' % (
@@ -517,34 +537,16 @@ class ServerBaseFW(object):
             if self._after_server_start is not None:
                 AsyncTools.sync_run_coroutine(self._after_server_start(self))
 
+            # 如果是func模式, 不处理循环, 直接返回启动结果即可
+            if self._start_server_mode == 'func':
+                return self._last_start_result
+
             # 开始进入循环处理
+            _server_info = self._last_start_result.server_info  # 真正服务启动返回的服务器信息
             while True:
                 if self._status == EnumServerRunStatus.WaitStop:
-                    # 收到指令等待停止
-                    # 服务关闭前处理函数
-                    if self._before_server_stop is not None:
-                        AsyncTools.sync_run_coroutine(
-                            self._before_server_stop(self)
-                        )
-
-                    while True:
-                        if self._status == EnumServerRunStatus.ForceStop:
-                            # 过程中又被要求强制退出
-                            break
-
-                        # 执行服务关闭前的处理函数
-                        _prepare_stop_result = AsyncTools.sync_run_coroutine(
-                            self._real_server_prepare_stop(tid)
-                        )
-                        if _prepare_stop_result.code == '00000' and not _prepare_stop_result.is_finished:
-                            # 预处理未完成，需要循环处理
-                            AsyncTools.sync_run_coroutine(
-                                asyncio.sleep(0.1)
-                            )
-                            continue
-                        else:
-                            # 预处理已完成，退出
-                            break
+                    # 收到指令等待停止, 执行关闭前的预处理操作
+                    self._prepare_stop_process_fun(tid)
                     break
                 elif self._status == EnumServerRunStatus.ForceStop:
                     # 收到指令马上停止
@@ -573,8 +575,75 @@ class ServerBaseFW(object):
                             )
                         break
 
+        # 正常情况func模式不应该走到这个这步骤, 说明出了异常
+        if self._start_server_mode == 'func':
+            self._logger.log(
+                logging.ERROR,
+                ('[SER-STARTING][NAME:%s][USE:%ss]%s: %s - %s' % (
+                    self._app_name,
+                    str((datetime.datetime.now() - self._start_begin_time).total_seconds()),
+                    _('start server error'), self._result.code, self._result.msg))
+            )
+            self._server_status_change(EnumServerRunStatus.Stop)
+            return _result
+
         # 线程结束就代表服务已关闭，执行结束处理函数
         AsyncTools.sync_run_coroutine(self._real_server_stop(tid, _server_info))
+        self._server_status_change(EnumServerRunStatus.Stop)
+        self._logger.log(
+            self._log_level,
+            '[SER-STOPED][NAME:%s][USE:%ss]%s' % (
+                self._app_name, str((datetime.datetime.now() - self._stop_begin_time).total_seconds()),
+                _('server stoped')
+            ))
+
+        # 服务关闭后执行函数
+        if self._after_server_stop is not None:
+            AsyncTools.sync_run_coroutine(self._after_server_stop(self))
+
+    def _prepare_stop_process_fun(self, tid):
+        """
+        关闭前的预处理函数
+
+        @param {int} tid - 线程id
+        """
+        # 服务关闭前处理函数
+        if self._before_server_stop is not None:
+            AsyncTools.sync_run_coroutine(
+                self._before_server_stop(self)
+            )
+
+        while True:
+            if self._status == EnumServerRunStatus.ForceStop:
+                # 过程中又被要求强制退出
+                break
+
+            # 执行服务关闭前的处理函数
+            _prepare_stop_result = AsyncTools.sync_run_coroutine(
+                self._real_server_prepare_stop(tid)
+            )
+            if not _prepare_stop_result.is_success() and not _prepare_stop_result.is_finished:
+                # 预处理未完成，需要循环处理
+                AsyncTools.sync_run_coroutine(
+                    asyncio.sleep(0.1)
+                )
+                continue
+            else:
+                # 预处理已完成，退出
+                break
+
+    def _func_mode_stop_thread_fun(self, tid):
+        """
+        func模式的关闭处理线程函数
+
+        @param {int} tid - 线程id
+        """
+        # 服务关闭前, 执行关闭前的预处理操作
+        self._prepare_stop_process_fun(tid)
+
+        # 执行真正服务关闭
+        AsyncTools.sync_run_coroutine(self._real_server_stop(tid, None))
+
         self._server_status_change(EnumServerRunStatus.Stop)
         self._logger.log(
             self._log_level,

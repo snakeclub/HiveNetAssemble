@@ -128,15 +128,6 @@ class CResult(NullObj):
 
     """
 
-    #############################
-    # 内部变量
-    #############################
-
-    _i18n_obj = None  # 国际化类实例化对象
-    i18n_error_type_msg_id = ''  # 国际化记录下来的错误类型ID串( 第1位的错误说明)
-    i18n_msg_id = ''  # 国际化记录下来的错误明细编码ID串
-    i18n_msg_paras = None  # 国际化记录下来的可替换参数变量
-
     def __init__(self, code='00000', msg=None, error='', trace_str='',
                  i18n_obj=None, i18n_msg_paras=()):
         """
@@ -153,11 +144,12 @@ class CResult(NullObj):
         """
         self.code = code
         self.msg = msg
-        self.i18n_msg_id = msg
-        self.i18n_msg_paras = i18n_msg_paras
-        self._i18n_obj = i18n_obj
+        self.i18n_msg_id = msg  # 国际化记录下来的错误明细编码ID串
+        self.i18n_msg_paras = i18n_msg_paras  # 国际化记录下来的可替换参数变量
+        self._i18n_obj = i18n_obj  # 国际化类实例化对象
         self.error = error
         self.trace_str = trace_str
+        self.i18n_error_type_msg_id = '' # 国际化记录下来的错误类型ID串( 第1位的错误说明)
         if i18n_obj is None:
             # 没有传国际化对象, 尝试获取全局的国际化对象
             self._i18n_obj = get_global_i18n()

@@ -126,10 +126,12 @@ class AppKeyAuthSanic(AppKeyAuth):
                 else:
                     _status = 200
                     if isinstance(resp, (tuple, list)):
-                        # 是列表, 第1个是要返回的值, 第2个是http状态码
+                        # 是列表, 第1个是要返回的值, 第2个是http状态码, 第3个是header字典
                         _dict = resp[0]
                         if len(resp) > 1:
                             _status = resp[1]
+                        if len(resp) > 2:
+                            _headers = resp[2]
                     else:
                         _dict = resp
 

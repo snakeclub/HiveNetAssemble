@@ -233,7 +233,7 @@ class HCrypto(object):
             return _encrypt_data
 
     @classmethod
-    def ras_decrypt(cls, rsa_key, encrypt_data, output_str: bool = True, encoding: str = 'utf-8'):
+    def rsa_decrypt(cls, rsa_key, encrypt_data, output_str: bool = True, encoding: str = 'utf-8'):
         """
         解密数据
 
