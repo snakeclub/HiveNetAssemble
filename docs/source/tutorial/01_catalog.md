@@ -11,14 +11,14 @@ HiveNetAssemble是用于统一安装所有组件的集合库，由于组件的�
 
 ## HiveNetWebUtils
 
-版本： v0.1.0
+版本： v0.1.1
 
 [HiveNetWebUtils总览](HiveNetWebUtils/01_catalog.md)
 
 
 ## HiveNetSimpleSanic
 
-版本： v0.1.0
+版本： v0.1.2
 
 [HiveNetSimpleSanic总览](HiveNetSimpleSanic/01_catalog.md)
 
