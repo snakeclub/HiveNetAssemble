@@ -19,6 +19,7 @@ Welcome to HiveNetAssemble's documentation!
    HiveNetPromptPlus/modules
    HiveNetConsole/modules
    HiveNetFileTransfer/modules
+   HiveNetNoSql/modules
 
 
 Indices and tables

@@ -70,6 +70,11 @@ sys.path.append(os.path.join(
     os.path.abspath(os.path.dirname(__file__)),
     os.path.pardir, os.path.pardir, 'HiveNetFileTransfer'
 ))
+# 子项目HiveNetNoSql的检索路径
+sys.path.append(os.path.join(
+    os.path.abspath(os.path.dirname(__file__)),
+    os.path.pardir, os.path.pardir, 'HiveNetNoSql'
+))
 
 
 # -- Project information -----------------------------------------------------

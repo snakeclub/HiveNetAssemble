@@ -105,3 +105,12 @@ HiveNetFileTransfer
 
    tutorial/HiveNetFileTransfer/*
 
+
+HiveNetNoSql
+------------
+
+.. toctree::
+   :glob:
+
+   tutorial/HiveNetNoSql/*
+
