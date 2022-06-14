@@ -93,6 +93,8 @@ extensions = [
     'sphinx.ext.coverage',
     'sphinx.ext.viewcode',
     'sphinx.ext.githubpages',
+    'sphinx.ext.napoleon',
+    'six',
     'napoleon_snakerpy',
     'recommonmark',
     'sphinx_markdown_tables'
