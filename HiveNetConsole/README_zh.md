@@ -9,4 +9,4 @@ HiveNetConsole是简单的命令行执行框架，可在该框架上基于yaml�
 5. 跨平台;
 
 
-文档地址: https://hivenetassemble.readthedocs.io/en/latest/
+文档地址: https://hivenetassemble.readthedocs.io/zh_CN/latest/

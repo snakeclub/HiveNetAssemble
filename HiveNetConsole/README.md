@@ -8,4 +8,4 @@ HiveNetConsole is a simple command line execution framework, which can be extend
 4. Support the direct execution of commands in the shell and the execution of batch command files;
 5. Cross platform;
 
-docs: https://hivenetassemble.readthedocs.io/en/latest/
+docs: https://hivenetassemble.readthedocs.io/zh_CN/latest/
