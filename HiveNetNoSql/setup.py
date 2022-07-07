@@ -15,9 +15,9 @@ from setuptools import setup, find_packages
 
 
 LONG_DESCRIPTION = """
-HiveNetNoSql is a general NoSQL data access driver framework. Referring to the syntax of MongoDB, it abstracts the data access operations of NoSQL to facilitate the data access of various databases (including relational databases and NoSQL databases) using the same set of NoSQL operations. In this package, the driver adaptation of MongoDB and SQLite is implemented, and the adaptation of other databases can be implemented according to their own needs.
+HiveNetNoSql is a general NoSQL data access driver framework. Referring to the syntax of MongoDB, it abstracts the data access operations of NoSQL to facilitate the data access of various databases (including relational databases and NoSQL databases) using the same set of NoSQL operations. In this package, the driver adaptation of MongoDB, Sqlite, MySQL and Postgresql is implemented, and the adaptation of other databases can be implemented according to their own needs.
 
-HiveNetNoSql是一个通用的NoSql数据访问驱动框架, 参考MongoDB的语法对NoSql的数据访问操作进行了抽象, 便于对各类数据库(包括关系型数据库和NoSql数据库)采用同一套NoSql操作进行数据访问, 在该包中实现了MongoDB和Sqlite的驱动适配, 可以根据自己的需要实现其他数据库的适配实现。
+HiveNetNoSql是一个通用的NoSql数据访问驱动框架, 参考MongoDB的语法对NoSql的数据访问操作进行了抽象, 便于对各类数据库(包括关系型数据库和NoSql数据库)采用同一套NoSql操作进行数据访问, 在该包中实现了MongoDB、Sqlite、MySQL、Postgresql的驱动适配, 可以根据自己的需要实现其他数据库的适配实现。
 """.strip()
 
 SHORT_DESCRIPTION = """
@@ -25,9 +25,7 @@ A general NoSQL data access driver framework.""".strip()
 
 DEPENDENCIES = [
     'HiveNetCore>=0.1.2',
-    'bson',
-    'motor',
-    'aiosqlite'
+    'bson'
 ]
 
 TEST_DEPENDENCIES = []

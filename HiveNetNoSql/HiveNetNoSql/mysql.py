@@ -6,36 +6,35 @@
 # License, v. 2.0. If a copy of the MPL was not distributed with this
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 """
-sqlite的HiveNetNoSql实现模块
+MySQL的HiveNetNoSql实现模块
 
-@module sqlite
-@file sqlite.py
+@module mysql
+@file mysql.py
 """
 import os
 import sys
 import copy
 import re
 from typing import Any, Union
-import sqlite3
 import json
+import aiomysql
 from HiveNetCore.utils.run_tool import AsyncTools
-from HiveNetCore.utils.string_tool import StringTool
 from HiveNetCore.connection_pool import PoolConnectionFW
 # 自动安装依赖库
 from HiveNetCore.utils.pyenv_tool import PythonEnvTools
 try:
-    import aiosqlite
+    import aiomysql
 except ImportError:
-    PythonEnvTools.install_package('aiosqlite')
-    import aiosqlite
+    PythonEnvTools.install_package('aiomysql')
+    import aiomysql
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 from HiveNetNoSql.base.driver_fw import NosqlAIOPoolDriver
 
 
-class SQLitePoolConnection(PoolConnectionFW):
+class MySQLPoolConnection(PoolConnectionFW):
     """
-    SQLite连接池连接对象
+    MySQL连接池连接对象
     """
     #############################
     # 需要继承类实现的函数
@@ -46,8 +45,11 @@ class SQLitePoolConnection(PoolConnectionFW):
 
         @returns {bool} - 返回检查结果
         """
-        # 不支持检测连接, 直接返回True就好
-        return True
+        try:
+            await AsyncTools.async_run_coroutine(self._conn.ping(reconnect=False))
+            return True
+        except:
+            return False
 
     async def _fade_close(self) -> Any:
         """
@@ -72,9 +74,9 @@ class SQLitePoolConnection(PoolConnectionFW):
         await AsyncTools.async_run_coroutine(self._conn.close())
 
 
-class SQLiteNosqlDriver(NosqlAIOPoolDriver):
+class MySQLNosqlDriver(NosqlAIOPoolDriver):
     """
-    nosql数据库SQLite驱动
+    nosql数据库MySQL驱动
     """
 
     #############################
@@ -85,19 +87,18 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         初始化驱动
 
         @param {dict} connect_config={} - 数据库的连接参数
-            host {str} - 数据库文件路径, 或使用":memory:"在内存上创建数据库
-            port {int} - 连接数据库的端口(SQLite无效)
-            usedb {str} - 登录后默认切换到的数据库(SQLite无效)
-            username {str} - 登录验证用户(SQLite无效)
-            password {str} - 登录验证密码(SQLite无效)
-            dbname {str} - 登录用户的数据库名(SQLite无效)
+            host {str} - 数据库主机地址, 默认为'localhost'
+            port {int} - 连接数据库的端口, 默认为3306
+            usedb {str} - 登录后默认切换到的数据库
+            username {str} - 登录验证用户
+            password {str} - 登录验证密码
+            dbname {str} - 登录用户的数据库名(MySQL无效)
             connect_on_init {bool} - 是否启动时直接连接数据库
             connect_timeout {float} - 连接数据库的超时时间, 单位为秒, 默认为20
             default_str_len {int} - 默认的字符串类型长度, 默认为30
             ...驱动实现类自定义支持的参数
             transaction_share_cursor {bool} - 进行事务处理是否复用同一个游标对象, 默认为True
-            sqlite3.connect 支持的其他参数...
-            check_same_thread: 是否控制检查与创建连接的是一个线程
+            aiomysql.connect 支持的其他参数...
         @param {dict} pool_config={} - 连接池配置
             max_size {int} - 连接池的最大大小, 默认为100
             min_size {int} - 连接池维持的最小连接数量, 默认为0
@@ -133,6 +134,25 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         )
 
     #############################
+    # 特殊的重载函数
+    #############################
+
+    async def list_dbs(self) -> list:
+        """
+        列出数据库清单
+
+        @returns {list} - 数据库名清单
+        """
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
+            self._generate_sqls('list_dbs')
+        )
+        _ret = await self._execute_sqls(
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
+        )
+        # 需要将字典形式的列表转换为数据库名列表, 查询结果无法转换为标准的name, 需要特殊实现
+        return [_db['Database'] for _db in _ret]
+
+    #############################
     # 需要继承类实现的内部函数
     #############################
     def _get_db_creator(self, connect_config: dict, pool_config: dict, driver_config: dict) -> tuple:
@@ -140,18 +160,17 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         获取数据库连接驱动及参数
 
         @param {dict} connect_config={} - 数据库的连接参数
-            host {str} - 数据库文件路径, 或使用":memory:"在内存上创建数据库
-            port {int} - 连接数据库的端口(SQLite无效)
-            usedb {str} - 登录后默认切换到的数据库(SQLite无效)
-            username {str} - 登录验证用户(SQLite无效)
-            password {str} - 登录验证密码(SQLite无效)
-            dbname {str} - 登录用户的数据库名(SQLite无效)
+            host {str} - 数据库主机地址, 默认为'localhost'
+            port {int} - 连接数据库的端口, 默认为3306
+            usedb {str} - 登录后默认切换到的数据库
+            username {str} - 登录验证用户
+            password {str} - 登录验证密码
+            dbname {str} - 登录用户的数据库名(MySQL无效)
             connect_on_init {bool} - 是否启动时直接连接数据库
             connect_timeout {float} - 连接数据库的超时时间, 单位为秒, 默认为20
             ...驱动实现类自定义支持的参数
             transaction_share_cursor {bool} - 进行事务处理是否复用同一个游标对象, 默认为True
-            sqlite3.connect 支持的其他参数...
-            check_same_thread: 是否控制检查与创建连接的是一个线程
+            aiomysql.connect 支持的其他参数...
         @param {dict} pool_config={} - 连接池配置
             max_size {int} - 连接池的最大大小, 默认为100
             min_size {int} - 连接池维持的最小连接数量, 默认为0
@@ -181,7 +200,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 }
             logger {Logger} - 传入驱动的日志对象
             close_action {str} - 关闭连接时自动处理动作, None-不处理, 'commit'-自动提交, 'rollback'-自动回滚
-
         @returns {dict} - 返回连接池的相关参数
             {
                 'creator': class,  # 连接创建模块或对象
@@ -193,10 +211,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'current_db_name': '',  # 当前数据库名
             }
         """
-        # 需要sqlite 3.9.0 以上的版本支持
-        if (StringTool.version_cmp(sqlite3.sqlite_version, '3.9.0') == '<'):
-            raise aiosqlite.NotSupportedError('only support sqlite 3.9.0 or higher version')
-
         # 初始化处理函数的映射字典
         self._sqls_fun_mapping = {
             'create_db': self._sqls_fun_create_db,
@@ -224,32 +238,32 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
             '$ne': '!='
         }
 
-        # 生成SQLite的连接配置
-        _args = [connect_config['host']]
+        # 生成aiomysql的连接配置
+        _args = []
         _kwargs = {}
-        if connect_config.get('connect_timeout', None) is not None:
-            _kwargs['timeout'] = connect_config['connect_timeout']
+
+        # 要处理的参数
+        _kwargs['db'] = connect_config.get('usedb', None)
+        _kwargs['user'] = connect_config.get('username', None)
+        _kwargs['connect_timeout'] = connect_config.get('connect_timeout', 20)
 
         # 移除不使用的参数
         _connect_config = copy.deepcopy(connect_config)
-        for _pop_item in ('host', 'port', 'usedb', 'dbname', 'username', 'password', 'connect_on_init', 'connect_timeout', 'transaction_share_cursor'):
+        for _pop_item in ('usedb', 'dbname', 'username', 'connect_on_init', 'connect_timeout', 'transaction_share_cursor'):
             _connect_config.pop(_pop_item, None)
+
         # 合并参数
         _kwargs.update(_connect_config)
 
         return {
-            'creator': aiosqlite, 'pool_connection_class': SQLitePoolConnection,
+            'creator': aiomysql, 'pool_connection_class': MySQLPoolConnection,
             'args': _args, 'kwargs': _kwargs, 'connect_method_name': 'connect',
             'pool_update_config': {
-                # sqlite的限制: 不支持多线程, 连接池设置最大为1; 不检查空闲连接有效性, 也不释放连接
-                'max_size': 1,
-                'ping_on_idle': False,
-                'free_idle_time': 0,
                 'pool_extend_paras': {
                     'close_action': driver_config.get('close_action', None)
                 }
             },
-            'current_db_name': 'main'
+            'current_db_name': _kwargs['db']
         }
 
     def _generate_sqls(self, op: str, *args, **kwargs) -> tuple:
@@ -268,7 +282,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         """
         _func = self._sqls_fun_mapping.get(op, None)
         if _func is None:
-            raise aiosqlite.NotSupportedError('driver not support this operation')
+            raise aiomysql.NotSupportedError('driver not support this operation')
 
         _ret = _func(op, *args, **kwargs)
         if len(_ret) == 4:
@@ -299,8 +313,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         @param {Any} conn - 传入连接对象
         """
-        # 注入正则表达式的支持函数
-        AsyncTools.sync_run_coroutine(conn.create_function("REGEXP", 2, self._regexp))
+        pass
 
     async def _get_cols_info(self, collection: str, session: Any = None) -> list:
         """
@@ -319,22 +332,44 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
             _cursor = None
 
         # 获取表结构
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
-        _sql = "PRAGMA %stable_info('%s')" % (_db_prefix, collection)
+        _sql = "select column_name as name, data_type as type from information_schema.columns where table_schema='%s' and table_name='%s'" % (
+            self._db_name, collection
+        )
         _ret = await self._execute_sql(
             _sql, paras=None, is_query=True, conn=_conn, cursor=_cursor
         )
 
         # 处理标准类型
         for _row in _ret:
-            if _row['type'] == 'JSON':
-                _row['type'] = 'json'
-            if _row['type'] == 'text':
-                _row['type'] = 'str'
+            if _row['type'] == 'tinyint':
+                _row['type'] = 'bool'
             elif _row['type'].startswith('varchar('):
                 _row['type'] = 'str'
 
         return _ret
+
+    async def _get_current_db_name(self, session: Any = None) -> str:
+        """
+        获取当前数据库名
+
+        @param {Any} session=None - 指定事务连接对象
+
+        @returns {str} - 数据库名
+        """
+        if session is not None:
+            _conn = session[0]
+            _cursor = session[1]
+        else:
+            _conn = None
+            _cursor = None
+
+        # 获取当前数据库名称
+        _sql = "SELECT DATABASE() as db_name"
+        _ret = await self._execute_sql(
+            _sql, paras=None, is_query=True, conn=_conn, cursor=_cursor
+        )
+
+        return _ret[0]['db_name']
 
     #############################
     # 需要单独重载的函数
@@ -346,22 +381,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         @param {str} name - 数据库名
         """
         self._db_name = name
-
-    #############################
-    # sqlite3支持正则表达式的处理
-    #############################
-
-    def _regexp(self, expr, item):
-        """
-        正则表达式的函数
-
-        @param {str} expr - 表达式文本
-        @param {str} item - 匹配对象
-
-        @returns {Any} - 返回匹配结果
-        """
-        reg = re.compile(expr)
-        return reg.search(item) is not None
 
     #############################
     # 支持SQL处理的通用函数
@@ -380,7 +399,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         elif std_type == 'bool':
             return 'bool'
         elif std_type == 'json':
-            return 'JSON'
+            return 'json'
         else:
             return 'varchar(%d)' % (self._default_str_len if len is None else len)
 
@@ -450,10 +469,10 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         @returns {str} - 转义处理后的字符串, 注意不包含外面的引号
         """
-        return re.sub(r"\'", "''", val)
+        return re.sub(r"\'", "''", re.sub(r"\\", "\\\\", val))  # 单引号转义和反斜杠转义
 
     def _get_filter_unit_sql(self, key: str, val: Any, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> str:
+            sql_paras: list = []) -> str:
         """
         获取兼容mongodb过滤条件规则的单个规则对应的sql
 
@@ -465,19 +484,17 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
 
         @returns {str} - 单个规则对应的sql
         """
         # 判断是否处理json的值, 形成最后比较的 key 值
         _key = key
+        _is_json = False
         if fixed_col_define is not None:
             _fixed_cols = fixed_col_define.get('cols', [])
-            _fixed_cols.append('_id')
-            if key not in _fixed_cols:
-                _key = 'json_query_%s.value' % key
-                if key not in json_query_cols:
-                    json_query_cols.append(key)
+            if key != '_id' and key not in _fixed_cols:
+                _is_json = True
+                _key = "`nosql_driver_extend_tags`->'$.%s'" % key
 
         if type(val) == dict:
             # 有特殊规则
@@ -486,24 +503,28 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 if _op in self._filter_symbol_mapping.keys():
                     # 比较值转换为数据库的格式
                     _dbtype, _cmp_val = self._python_to_dbtype(_para)
-                    _cds.append('%s %s ?' % (_key, self._filter_symbol_mapping[_op]))
+                    _cds.append('%s %s %s' % (_key, self._filter_symbol_mapping[_op], '%s'))
                     sql_paras.append(_cmp_val)
                 elif _op == '$regex':
-                    _cds.append("%s REGEXP ?" % _key)
+                    if _is_json:
+                        # json查出来的字段默认带双引号, 因此需要去掉双引号才能进行正则比对
+                        _cds.append("trim(both '\"' from %s) REGEXP %s" % (_key, '%s'))
+                    else:
+                        _cds.append("%s REGEXP %s" % (_key, '%s'))
                     sql_paras.append(_para)
                 else:
-                    raise aiosqlite.NotSupportedError('sqlite3 not support this search operation [%s]' % _op)
+                    raise aiomysql.NotSupportedError('aiomysql not support this search operation [%s]' % _op)
             _sql = ' and '.join(_cds)
         else:
             # 直接相等的条件
             _dbtype, _cmp_val = self._python_to_dbtype(val)
-            _sql = '%s = ?' % _key
+            _sql = '%s = %s' % (_key, '%s')
             sql_paras.append(_cmp_val)
 
         return _sql
 
     def _get_filter_sql(self, filter: dict, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> str:
+            sql_paras: list = []) -> str:
         """
         获取兼容mongodb过滤条件规则的sql语句
 
@@ -514,7 +535,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
 
         @returns {str} - 返回的sql语句, 如果没有条件则返回None
         """
@@ -530,8 +550,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 for _condition in _val:
                     # 逐个条件处理
                     _where = self._get_filter_sql(
-                        _condition, fixed_col_define=fixed_col_define, sql_paras=sql_paras,
-                        json_query_cols=json_query_cols
+                        _condition, fixed_col_define=fixed_col_define, sql_paras=sql_paras
                     )
                     if len(_condition) > 1:
                         # 多条件的情况，需要增加括号进行集合处理
@@ -547,8 +566,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
             else:
                 # 正常的and条件
                 _where = self._get_filter_unit_sql(
-                    _col, _val, fixed_col_define=fixed_col_define, sql_paras=sql_paras,
-                    json_query_cols=json_query_cols
+                    _col, _val, fixed_col_define=fixed_col_define, sql_paras=sql_paras
                 )
                 # 添加条件
                 _condition_list.append(_where)
@@ -557,7 +575,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         return ' and '.join(_condition_list)
 
     def _get_update_sql(self, update: dict, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> str:
+            sql_paras: list = []) -> str:
         """
         获取兼容mongodb更新语句的sql语句
 
@@ -568,91 +586,110 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
 
         @returns {str} - 返回更新部分语句sql
         """
-        # 更新辅助字典, key为要更新的字段名, value为{'sql': '对应的sql语句, 比如?', 'paras': [传入sql的参数列表]}
+        # 更新辅助字典, key为要更新的字段名, value为{'sql': '对应的sql语句, 比如%s', 'paras': [传入sql的参数列表]}
         _upd_dict = {}
 
-        # 遍历处理
-        _extend_dict = {'sql': None, 'paras': []}
+        # 扩展字段的set字典, 设置json指定key的值, 每处理一个字段在sqls增加一个语句, 对应在paras参数列表
+        _extend_set_dict = {'sqls': [], 'paras': []}
+
+        # 扩展字段的remove列表, 设置要删除json的key的字段
+        _extend_remove_list = []
+
+        # 遍历处理,
+
         for _op, _para in update.items():
             for _key, _val in _para.items():
                 if fixed_col_define is None or _key == '_id' or _key in fixed_col_define.get('cols', []):
                     # 是固定字段
                     if _op == '$set':
-                        _upd_dict[_key] = {'sql': '?', 'paras': [self._python_to_dbtype(_val)[1]]}
+                        _upd_dict[_key] = {'sql': '%s', 'paras': [self._python_to_dbtype(_val)[1]]}
                     elif _op == '$unset':
                         _upd_dict[_key] = {'sql': 'NULL', 'paras': []}
                     elif _op == '$inc':
-                        _upd_dict[_key] = {'sql': 'ifnull(%s,0) + ?' % _key, 'paras': [_val]}
+                        _upd_dict[_key] = {'sql': 'ifnull(%s,0) + %s' % (_key, '%s'), 'paras': [_val]}
                     elif _op == '$mul':
-                        _upd_dict[_key] = {'sql': 'ifnull(%s,0) * ?' % _key, 'paras': [_val]}
+                        _upd_dict[_key] = {'sql': 'ifnull(%s,0) * %s' % (_key, '%s'), 'paras': [_val]}
                     elif _op == '$min':
                         _upd_dict[_key] = {
-                            'sql': 'case when ifnull({key}, ?) < ? then ifnull({key},0) else ? end'.format(key=_key),
+                            'sql': 'case when ifnull({key}, {pos}) < {pos} then ifnull({key},0) else {pos} end'.format(key=_key, pos='%s'),
                             'paras': [_val, _val, _val]
                         }
                     elif _op == '$max':
                         _upd_dict[_key] = {
-                            'sql': 'case when ifnull({key}, ?) > ? then ifnull({key},0) else ? end'.format(key=_key),
+                            'sql': 'case when ifnull({key}, {pos}) > {pos} then ifnull({key},0) else {pos} end'.format(key=_key, pos='%s'),
                             'paras': [_val, _val, _val]
                         }
                     else:
-                        raise aiosqlite.NotSupportedError('sqlite3 not support this update operation [%s]' % _op)
+                        raise aiomysql.NotSupportedError('aiomysql not support this update operation [%s]' % _op)
                 else:
                     # 是扩展字段
                     if _op == '$set':
                         _dbtype, _dbval = self._python_to_dbtype(_val, is_json=True)
-                        if _dbtype in ('bool', 'json'):
-                            _sql = 'json_set({sql}, "$.{key}", json(?))'
+                        if _dbtype in ('int', 'float', 'bool'):
+                            _sql = "'$.{key}', {val}"
+                        elif _dbtype == 'json':
+                            _sql = "'$.{key}', CONVERT({pos}, json)"
+                            _extend_set_dict['paras'].append(_dbval)
                         else:
-                            _sql = 'json_set({sql}, "$.{key}", ?)'
-
-                        _extend_dict['paras'].append(_dbval)
+                            _sql = "'$.{key}', {pos}"
+                            _extend_set_dict['paras'].append(_dbval)
                     elif _op == '$unset':
-                        _sql = 'json_remove({sql}, "$.{key}")'
+                        _extend_remove_list.append("'$.%s'" % _key)
+                        continue
                     elif _op in ('$inc', '$mul', '$min', '$max'):
                         _dbtype, _dbval = self._python_to_dbtype(_val, is_json=True)
                         # 需要取值出来, 添加查询字段
                         if _op == '$inc':
-                            _sql = 'json_set({sql}, "$.{key}", ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), 0) + ?)'
-                            _extend_dict['paras'].append(_dbval)
+                            _sql = "'$.{key}', cast((ifnull(nosql_driver_extend_tags->'$.{key}', 0) + {val}) as float)"
+                            # _extend_set_dict['paras'].append(_dbval)
                         elif _op == '$mul':
-                            _sql = 'json_set({sql}, "$.{key}", ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), 0) * ?)'
-                            _extend_dict['paras'].append(_dbval)
+                            _sql = "'$.{key}', cast((ifnull(nosql_driver_extend_tags->'$.{key}', 0) * {val}) as float)"
+                            # _extend_set_dict['paras'].append(_dbval)
                         elif _op == '$min':
-                            _sql = 'json_set({sql}, "$.{key}", case when ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), ?) < ? then ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), 0) else ? end)'
-                            _extend_dict['paras'].extend([_dbval, _dbval, _dbval])
+                            _sql = "'$.{key}', cast(case when ifnull(nosql_driver_extend_tags->'$.{key}', {val}) < {val} then ifnull(nosql_driver_extend_tags->'$.{key}', 0) else {val} end as float)"
+                            # _extend_set_dict['paras'].extend([_dbval, _dbval, _dbval])
                         elif _op == '$max':
-                            _sql = 'json_set({sql}, "$.{key}", case when ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), ?) > ? then ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), 0) else ? end)'
-                            _extend_dict['paras'].extend([_dbval, _dbval, _dbval])
+                            _sql = "'$.{key}', cast(case when ifnull(nosql_driver_extend_tags->'$.{key}', {val}) > {val} then ifnull(nosql_driver_extend_tags->'$.{key}', 0) else {val} end as float)"
+                            # _extend_set_dict['paras'].extend([_dbval, _dbval, _dbval])
                     else:
-                        raise aiosqlite.NotSupportedError('sqlite3 not support this update operation [%s]' % _op)
+                        raise aiomysql.NotSupportedError('aiomysql not support this update operation [%s]' % _op)
 
                     # 处理格式化
-                    _extend_dict['sql'] = _sql.format(
-                        sql='nosql_driver_extend_tags' if _extend_dict['sql'] is None else _extend_dict['sql'],
-                        key=_key
+                    _extend_set_dict['sqls'].append(
+                        _sql.format(key=_key, pos='%s', val=str(_dbval))
                     )
 
         # 开始生成sql语句和返回参数
         _sqls = []
         for _key, _val in _upd_dict.items():
-            _sqls.append('%s=%s' % (_key, _val['sql']))
+            _sqls.append('`%s`=%s' % (_key, _val['sql']))
             if _val['paras'] is not None:
                 sql_paras.extend(_val['paras'])
 
         # 处理扩展字段
-        if _extend_dict['sql'] is not None:
-            _sqls.append('nosql_driver_extend_tags=%s' % _extend_dict['sql'])
-            sql_paras.extend(_extend_dict['paras'])
+        _remove_sql = ''
+        if len(_extend_remove_list) > 0:
+            _remove_sql = "JSON_REMOVE(nosql_driver_extend_tags, %s)" % ','.join(_extend_remove_list)
+
+        if len(_extend_set_dict['sqls']) == 0:
+            if _remove_sql != '':
+                _sqls.append('nosql_driver_extend_tags=%s' % _remove_sql)
+        else:
+            _sqls.append(
+                'nosql_driver_extend_tags=JSON_SET(%s, %s)' % (
+                    'nosql_driver_extend_tags' if _remove_sql == '' else _remove_sql,
+                    ','.join(_extend_set_dict['sqls'])
+                )
+            )
+            sql_paras.extend(_extend_set_dict['paras'])
 
         return ','.join(_sqls)
 
     def _get_projection_sql(self, projection: Union[dict, list], fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = [], is_group_by: bool = False) -> str:
+            sql_paras: list = [], is_group_by: bool = False) -> str:
         """
         获取兼容mongodb查询返回字段的sql语句
 
@@ -665,7 +702,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
         @param {bool} is_group_by=False - 指定是否group by的处理, 如果是不会处理_id字段
 
         @returns {str} - 返回更新部分语句sql
@@ -689,29 +725,26 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         # 生成sql
         if fixed_col_define is None:
             # 全部认为是固定字段
-            return ','.join(_projection)
+            return '`%s`' % '`,`'.join(_projection)
 
         _fixed_cols = fixed_col_define.get('cols', [])
         _fixed_cols.append('_id')
         _real_cols = []
         for _col in _projection:
             if _col in _fixed_cols:
-                _real_cols.append(_col)
+                _real_cols.append('`%s`' % _col)
                 continue
-            elif _col in json_query_cols:
-                # 在查询字段中, 无需另外处理
-                _real_cols.append('json_query_{key}.value as {key}'.format(key=_col))
             else:
                 # 其他非固定字段
                 _real_cols.append(
-                    'json_extract(nosql_driver_extend_tags, "$.{key}") as {key}'.format(key=_col)
+                    "nosql_driver_extend_tags->'$.{key}' as `{key}`".format(key=_col)
                 )
 
         # 返回sql
         return ','.join(_real_cols)
 
     def _get_sort_sql(self, sort: list, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> str:
+            sql_paras: list = []) -> str:
         """
         获取兼容mongodb查询排序的sql语句
 
@@ -723,13 +756,12 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
 
         @returns {str} - 返回更新部分语句sql
         """
         if fixed_col_define is None:
             # 全部认为是固定字段
-            _sorts = ['%s %s' % (_item[0], 'asc' if _item[1] == 1 else 'desc') for _item in sort]
+            _sorts = ['`%s` %s' % (_item[0], 'asc' if _item[1] == 1 else 'desc') for _item in sort]
         else:
             _fixed_cols = fixed_col_define.get('cols', [])
             _fixed_cols.append('_id')
@@ -737,19 +769,16 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
             for _item in sort:
                 _col = _item[0]
                 if _col in _fixed_cols:
-                    _sorts.append('%s %s' % (_col, 'asc' if _item[1] == 1 else 'desc'))
+                    _sorts.append('`%s` %s' % (_col, 'asc' if _item[1] == 1 else 'desc'))
                 else:
-                    # 属于扩展字段, 添加到查询字段中
-                    if _col not in json_query_cols:
-                        json_query_cols.append(_col)
-
-                    _sorts.append('json_query_%s.value %s' % (_col, 'asc' if _item[1] == 1 else 'desc'))
+                    # 属于扩展字段
+                    _sorts.append("nosql_driver_extend_tags->'$.%s' %s" % (_col, 'asc' if _item[1] == 1 else 'desc'))
 
         # 返回结果
         return ','.join(_sorts)
 
     def _get_group_sql(self, group: dict, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> tuple:
+            sql_paras: list = []) -> tuple:
         """
         生成分组sql语句
 
@@ -795,29 +824,29 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                     _col = _col[1:]
                     if _col not in _fixed_cols:
                         # 非固定字段
-                        if _col not in json_query_cols:
-                            json_query_cols.append(_col)
-                        _col = 'json_query_%s.value' % _col
+                        _col = "nosql_driver_extend_tags->'$.%s'" % _col
+                    else:
+                        _col = "`%s`" % _col
 
-                    _select.append('%s(%s) as %s' % (_op_mapping[_op], _col, _key))
+                    _select.append('%s(%s) as `%s`' % (_op_mapping[_op], _col, _key))
                 else:
                     # 是值
-                    _select.append('%s(?) as %s' % (_op_mapping[_op], _key))
+                    _select.append('%s(%s) as `%s`' % (_op_mapping[_op], '%s', _key))
                     sql_paras.append(_col)
             elif _val_type == str and _val.startswith('$'):
                 # 是字段
                 _col = _val[1:]
                 if _col not in _fixed_cols:
                     # 非固定字段
-                    if _col not in json_query_cols:
-                        json_query_cols.append(_col)
-                    _col = 'json_query_%s.value' % _col
+                    _col = "nosql_driver_extend_tags->'$.%s'" % _col
+                else:
+                    _col = "`%s`" % _col
 
-                _select.append('%s as %s' % (_col, _key))
+                _select.append('%s as `%s`' % (_col, _key))
                 _groupby.append(_col)
             else:
                 # 是固定值
-                _select.append('? as %s' % _key)
+                _select.append('%s as `%s`' % ('%s', _key))
                 sql_paras.append(_val)
 
         return ','.join(_select), ','.join(_groupby)
@@ -829,23 +858,31 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         """
         驱动不支持的情况
         """
-        raise aiosqlite.NotSupportedError('sqlite3 not support this operation')
+        raise aiomysql.NotSupportedError('aiomysql not support this operation')
 
     def _sqls_fun_create_db(self, op: str, *args, **kwargs) -> tuple:
         """
         生成添加数据库的sql语句数组
         """
+        # 获取参数
         _name = args[0]  # 数据库名
-        _file = args[1] if len(args) > 1 else kwargs.get('file', ':memory:')  # 数据库文件
-        _sql = "ATTACH DATABASE ? AS ?"
+        _char_acter = args[1] if len(args) > 1 else kwargs.get('char_acter', None)  # 字符集, 例如utf8
+        _collate = args[2] if len(args) > 2 else kwargs.get('collate', None)  # 校对规则, 例如utf8_chinese_ci
 
-        return ([_sql], [(_file, _name)], {})
+        # 组成sql
+        _sql = "CREATE DATABASE if not exists `%s`" % _name
+        if _char_acter is not None:
+            _sql = '%s DEFAULT CHARACTER SET %s' % (_sql, _char_acter)
+        if _collate is not None:
+            _sql = "%s DEFAULT COLLATE %s" % (_sql, _collate)
+
+        return ([_sql], None, {})
 
     def _sqls_fun_list_dbs(self, op: str, *args, **kwargs) -> tuple:
         """
         生成获取数据库清单的sql语句数组
         """
-        _sql = "PRAGMA database_list"
+        _sql = "SHOW DATABASES"
         return ([_sql], None, {'is_query': True})
 
     def _sqls_fun_drop_db(self, op: str, *args, **kwargs) -> tuple:
@@ -853,59 +890,61 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         生成分离数据库的sql语句数组
         """
         _name = args[0]  # 数据库名
-        _sql = "DETACH DATABASE ?"
+        _sql = "DROP DATABASE `%s`" % _name
 
-        return ([_sql], [(_name, )], {})
+        return ([_sql], None, {})
 
     def _sqls_fun_create_collection(self, op: str, *args, **kwargs) -> tuple:
         """
         生成建表的sql语句数组
         """
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
+        _db_prefix = '`%s`.' % self._db_name
         _collection = args[0]
         _sqls = []
+        _checks = []  # 语句检查数组
 
         # 生成表字段清单
         _cols = []
         if kwargs.get('fixed_col_define', None) is not None:
             for _col_name, _col_def in kwargs['fixed_col_define'].items():
                 _cols.append(
-                    '%s %s' % (_col_name, self._dbtype_mapping(_col_def['type'], _col_def.get('len', None)))
+                    '`%s` %s' % (_col_name, self._dbtype_mapping(_col_def['type'], _col_def.get('len', None)))
                 )
 
         # 建表脚本, 需要带上数据库前缀
-        _sql = 'create table if not exists %s%s(_id varchar(100) primary key, %s nosql_driver_extend_tags JSON)' % (
+        _sql = 'create table if not exists %s`%s`(`_id` varchar(100) primary key, %s `nosql_driver_extend_tags` json)' % (
             _db_prefix, _collection, (', '.join(_cols) + ',') if len(_cols) > 0 else '',
         )
         _sqls.append(_sql)
+        _checks.append(None)
 
-        # 建索引脚本, 创建索引时, 索引名带数据库前缀, 表名无需带前缀
+        # 建索引脚本
         if kwargs.get('indexs', None) is not None:
             for _index_name, _index_def in kwargs['indexs'].items():
                 _cols = []
                 for _col_name, _para in _index_def['keys'].items():
-                    _cols.append(_col_name)
-                _sql = 'create %sindex if not exists %s%s on %s(%s)' % (
+                    _cols.append('`%s`' % _col_name)
+                _sql = 'create %sindex `%s` on %s`%s`(%s)' % (
                     'UNIQUE ' if _index_def.get('paras', {}).get('unique', False) else '',
-                    _db_prefix, _index_name, _collection, ','.join(_cols)
+                    _index_name, _db_prefix, _collection, ','.join(_cols)
                 )
                 _sqls.append(_sql)
+                _checks.append({'after_check': {'ignore_current_error': True}})  # 忽略语句执行失败
 
         # 返回结果
-        return (_sqls, None, {})
+        return (_sqls, None, {}, _checks)
 
     def _sql_fun_list_collections(self, op: str, *args, **kwargs) -> tuple:
         """
         生成查询表清单的sql语句数组
         """
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
         _filter = kwargs.get('filter', None)
         # 生成where语句
         _sql_paras = []
         _where = self._get_filter_sql(_filter, sql_paras=_sql_paras)
 
-        _sql = "SELECT name FROM %ssqlite_master where type='table'%s order by name" % (
-            _db_prefix, '' if _where is None else ' and %s' % _where
+        _sql = "select `name` from (select table_name as `name` from information_schema.tables where table_schema='%s' and table_type='BASE TABLE') t%s order by `name`" % (
+            self._db_name, '' if _where is None else ' where %s' % _where
         )
 
         # 返回结果
@@ -915,8 +954,8 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         """
         生成删除表的sql语句数组
         """
-        _collection = '%s%s' % (
-            '' if self._db_name == 'main' else ('%s.' % self._db_name), args[0]
+        _collection = '`%s`.`%s`' % (
+            self._db_name, args[0]
         )
         _sql = "drop table %s" % _collection
         return ([_sql], None, {})
@@ -925,44 +964,38 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         """
         生成清空表的sql语句数组
         """
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
         _collection = args[0]
         _sqls = []
         _sqls.append(
-            'delete from %s%s' % (_db_prefix, _collection)
+            "truncate table `%s`.`%s`" % (self._db_name, _collection)
         )
-        # 自增长ID设置为0, 语句执行会报错
-        # _sqls.append(
-        #     "update %ssqlite_sequence SET seq = 0 where name ='%s'" % (_db_prefix, _collection)
-        # )
+
         return (_sqls, None, {})
 
     def _sql_fun_insert_one(self, op: str, *args, **kwargs) -> tuple:
         """
         生成插入数据的sql语句数组
         """
-        _collection = '%s%s' % (
-            '' if self._db_name == 'main' else ('%s.' % self._db_name), args[0]
-        )
+        _collection = '`%s`.`%s`' % (self._db_name, args[0])
         _row = args[1]
         _fixed_col_define = args[2] if len(args) > 2 else kwargs.get('fixed_col_define', {})
 
         # 生成插入字段和值
-        _cols = ['_id']
+        _cols = ['`_id`']
         _sql_paras = [_row.pop('_id')]
         for _col in _fixed_col_define.get('cols', []):
             _val = _row.pop(_col, None)
             if _val is not None:
-                _cols.append(_col)
+                _cols.append('`%s`' % _col)
                 _sql_paras.append(self._python_to_dbtype(_val)[1])
 
         # 剩余的内容放入扩展字段
-        _cols.append('nosql_driver_extend_tags')
+        _cols.append('`nosql_driver_extend_tags`')
         _sql_paras.append(self._python_to_dbtype(_row)[1])
 
         # 组成sql
         _sql = 'insert into %s(%s) values(%s)' % (
-            _collection, ','.join(_cols), ','.join(['?' for _tcol in _cols])
+            _collection, ','.join(_cols), ','.join(['%s' for _tcol in _cols])
         )
 
         return ([_sql], [_sql_paras], {})
@@ -972,7 +1005,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         生成更新数据的sql语句数组
         """
         # 获取参数
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
         _collection = args[0]
         _filter = args[1]
         _update = args[2]
@@ -980,38 +1012,21 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         # 处理where条件语句
         _where_sql_paras = []
-        _json_query_cols = []
         _where_sql = self._get_filter_sql(
-            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras
         )
 
         # 处理更新配置语句
         _update_sql_paras = []
         _update_sql = self._get_update_sql(
-            _update, fixed_col_define=_fixed_col_define, sql_paras=_update_sql_paras,
-            json_query_cols=_json_query_cols
+            _update, fixed_col_define=_fixed_col_define, sql_paras=_update_sql_paras
         )
 
-        _sql_collection = '%s%s' % (_db_prefix, _collection)
-        if len(_json_query_cols) == 0:
-            # 没有以json对象做条件的情况
-            _sql = 'update %s set %s' % (_sql_collection, _update_sql)
-            if _where_sql is not None:
-                _sql = '%s where %s' % (_sql, _where_sql)
-                _update_sql_paras.extend(_where_sql_paras)
-        else:
-            # 有使用json对象做条件, 由于update语句不支持json_tree, 要使用子查询的方式处理
-            _tabs = [_sql_collection]
-            for _col in _json_query_cols:
-                _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
-
-            _sql = 'update %s set %s where _id in (select _id from %s%s)' % (
-                _sql_collection, _update_sql, ','.join(_tabs),
-                '' if _where_sql is None else ' where %s' % _where_sql
-            )
-            if _where_sql is not None:
-                _update_sql_paras.extend(_where_sql_paras)
+        _sql_collection = '`%s`.`%s`' % (self._db_name, _collection)
+        _sql = 'update %s set %s' % (_sql_collection, _update_sql)
+        if _where_sql is not None:
+            _sql = '%s where %s' % (_sql, _where_sql)
+            _update_sql_paras.extend(_where_sql_paras)
 
         # 返回语句
         return ([_sql], [_update_sql_paras], {})
@@ -1021,39 +1036,22 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         生成删除数据的sql语句数组
         """
         # 获取参数
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
         _collection = args[0]
         _filter = args[1]
         _fixed_col_define = kwargs.get('fixed_col_define', None)
 
         # 处理where条件语句
         _where_sql_paras = []
-        _json_query_cols = []
         _where_sql = self._get_filter_sql(
-            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras
         )
 
         _sql_paras = None
-        _sql_collection = '%s%s' % (_db_prefix, _collection)
-        if len(_json_query_cols) == 0:
-            # 没有以json对象做条件的情况
-            _sql = 'delete from %s' % _sql_collection
-            if _where_sql is not None:
-                _sql = '%s where %s' % (_sql, _where_sql)
-                _sql_paras = _where_sql_paras
-        else:
-            # 有使用json对象做条件, 由于delete语句不支持json_tree, 要使用子查询的方式处理
-            _tabs = [_sql_collection]
-            for _col in _json_query_cols:
-                _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
-
-            _sql = 'delete from %s where _id in (select _id from %s%s)' % (
-                _sql_collection, ','.join(_tabs),
-                '' if _where_sql is None else ' where %s' % _where_sql
-            )
-            if _where_sql is not None:
-                _sql_paras = _where_sql_paras
+        _sql_collection = '`%s`.`%s`' % (self._db_name, _collection)
+        _sql = 'delete from %s' % _sql_collection
+        if _where_sql is not None:
+            _sql = '%s where %s' % (_sql, _where_sql)
+            _sql_paras = _where_sql_paras
 
         # 返回语句
         return ([_sql], [_sql_paras], {})
@@ -1063,7 +1061,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         生成查询数据的sql语句数组
         """
         # 获取参数
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
         _collection = args[0]
         _filter = kwargs.get('filter', {})
         _projection = kwargs.get('projection', None)
@@ -1074,10 +1071,8 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         # 处理where条件语句
         _where_sql_paras = []
-        _json_query_cols = []
         _where_sql = self._get_filter_sql(
-            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras
         )
 
         # 处理sort语句
@@ -1085,30 +1080,21 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         _sort_sql = None
         if _sort is not None:
             _sort_sql = self._get_sort_sql(
-                _sort, fixed_col_define=_fixed_col_define, sql_paras=_sort_sql_paras,
-                json_query_cols=_json_query_cols
+                _sort, fixed_col_define=_fixed_col_define, sql_paras=_sort_sql_paras
             )
 
         # 处理projection语句
         _projection_sql_paras = []
         _projection_sql = self._get_projection_sql(
-            _projection, fixed_col_define=_fixed_col_define, sql_paras=_projection_sql_paras,
-            json_query_cols=_json_query_cols
+            _projection, fixed_col_define=_fixed_col_define, sql_paras=_projection_sql_paras
         )
 
-        # 形成查询json的表别名
-        _tabs = ['%s%s' % (_db_prefix, _collection)]
-        for _col in _json_query_cols:
-            _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
-
-        if _projection_sql == '*':
-            # 解决会把json_tree字段查出来的问题
-            _tabs[0] = '%s as _main_table' % _tabs[0]
-            _projection_sql = '_main_table.*'
+        # 查询表
+        _tab = '`%s`.`%s`' % (self._db_name, _collection)
 
         # 组装语句
         _sql_paras = []
-        _sql = 'select %s from %s' % (_projection_sql, ','.join(_tabs))
+        _sql = 'select %s from %s' % (_projection_sql, _tab)
         _sql_paras.extend(_projection_sql_paras)
 
         if _where_sql is not None:
@@ -1127,7 +1113,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 _sql = '%s %s' % (_sql, 'limit %d' % _limit)
         else:
             if _skip is not None:
-                _sql = '%s %s' % (_sql, 'limit %d offset %d' % (-1, _skip))
+                _sql = '%s %s' % (_sql, 'limit 18446744073709551615 offset %d' % _skip)
 
         # 返回最终结果
         return ([_sql], [_sql_paras], {'is_query': True})
@@ -1137,7 +1123,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         生成查询数据count的sql语句数组
         """
         # 获取参数
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
         _collection = args[0]
         _filter = kwargs.get('filter', {})
         _skip = kwargs.get('skip', None)
@@ -1146,40 +1131,37 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         # 处理where条件语句
         _where_sql_paras = []
-        _json_query_cols = []
         _where_sql = self._get_filter_sql(
-            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras
         )
 
-        # 形成查询json的表别名
-        _tabs = ['%s%s' % (_db_prefix, _collection)]
-        for _col in _json_query_cols:
-            _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
+        # 查询表名
+        _tab = '`%s`.`%s`' % (self._db_name, _collection)
 
         # 组装语句
         if _limit is not None or _skip is not None:
             # 有获取数据区间, 只能采用性能差的子查询模式
             _sql_paras = []
-            _sub_sql = 'select * from %s' % (','.join(_tabs))
+            _sql = 'select 1 from %s' % _tab
             if _where_sql is not None:
-                _sub_sql = '%s where %s' % (_sub_sql, _where_sql)
+                _sql = '%s where %s' % (_sql, _where_sql)
                 _sql_paras.extend(_where_sql_paras)
 
             # 增加skip和limit
             if _limit is not None:
                 if _skip is not None:
-                    _sub_sql = '%s %s' % (_sub_sql, 'limit %d offset %d' % (_limit, _skip))
+                    _sql = '%s %s' % (_sql, 'limit %d offset %d' % (_limit, _skip))
                 else:
-                    _sub_sql = '%s %s' % (_sub_sql, 'limit %d' % _limit)
+                    _sql = '%s %s' % (_sql, 'limit %d' % _limit)
             else:
                 if _skip is not None:
-                    _sub_sql = '%s %s' % (_sub_sql, 'limit %d offset %d' % (-1, _skip))
+                    _sql = '%s %s' % (_sql, 'limit 18446744073709551615 offset %d' % _skip)
 
-            _sql = 'select count(*) from (%s)' % _sub_sql
+            # 外面封装一层查询
+            _sql = 'select count(*) from (%s) t' % _sql
         else:
             _sql_paras = []
-            _sql = 'select count(*) from %s' % (','.join(_tabs))
+            _sql = 'select count(*) from %s' % _tab
 
             if _where_sql is not None:
                 _sql = '%s where %s' % (_sql, _where_sql)
@@ -1193,7 +1175,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         生成查询数据聚合的sql语句数组
         """
         # 获取参数
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
         _collection = args[0]
         _group = kwargs.get('group', None)
         _filter = kwargs.get('filter', {})
@@ -1203,28 +1184,23 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         # 处理group by语句
         _select_sql_paras = []
-        _json_query_cols = []
         _select_sql, _group_by_sql = self._get_group_sql(
-            _group, fixed_col_define=_fixed_col_define, sql_paras=_select_sql_paras,
-            json_query_cols=_json_query_cols
+            _group, fixed_col_define=_fixed_col_define, sql_paras=_select_sql_paras
         )
 
         # 处理where条件语句
         _where_sql_paras = []
         _where_sql = self._get_filter_sql(
-            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras
         )
 
-        # 形成查询json的表别名
-        _tabs = ['%s%s' % (_db_prefix, _collection)]
-        for _col in _json_query_cols:
-            _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
+        # 查询表名
+        _tab = '`%s`.`%s`' % (self._db_name, _collection)
 
         # 组装查询语句
         _sql_paras = []
         _sql = 'select %s from %s' % (
-            _select_sql, ','.join(_tabs)
+            _select_sql, _tab
         )
         _sql_paras.extend(_select_sql_paras)
 
@@ -1239,22 +1215,20 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         _sort_sql = None
         if _sort is not None:
             _sort_sql = self._get_sort_sql(
-                _sort, fixed_col_define=None, sql_paras=_sort_sql_paras,
-                json_query_cols=_json_query_cols
+                _sort, fixed_col_define=None, sql_paras=_sort_sql_paras
             )
 
         # 处理projection语句
         _projection_sql_paras = []
         _projection_sql = self._get_projection_sql(
             _projection, fixed_col_define=None, sql_paras=_projection_sql_paras,
-            json_query_cols=_json_query_cols, is_group_by=True
+            is_group_by=True
         )
 
-        if _sort_sql is not None or _projection_sql != '*':
-            # 有排序或指定返回字段的情况, 需要包装多一层
-            _sql = 'select %s from (%s)' % (_projection_sql, _sql)
-            if _sort_sql is not None:
-                _sql = '%s order by %s' % (_sql, _sort_sql)
+        if _sort_sql is not None:
+            # 有排序, 需要包装多一层
+            _sql = 'select %s from (%s) t' % (_projection_sql, _sql)
+            _sql = '%s order by %s' % (_sql, _sort_sql)
 
         # 返回结果
         return ([_sql], None if len(_sql_paras) == 0 else [_sql_paras], {'is_query': True})

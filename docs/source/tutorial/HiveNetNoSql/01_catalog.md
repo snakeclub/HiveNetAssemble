@@ -1,6 +1,6 @@
 # HiveNetNoSql总览
 
-HiveNetNoSql是一个通用的NoSql数据访问驱动框架, 参考MongoDB的语法对NoSql的数据访问操作进行了抽象, 便于对各类数据库(包括关系型数据库和NoSql数据库)采用同一套NoSql操作进行数据访问, 在该包中实现了MongoDB和Sqlite的驱动适配, 可以根据自己的需要实现其他数据库的适配实现。
+HiveNetNoSql是一个通用的NoSql数据访问驱动框架, 参考MongoDB的语法对NoSql的数据访问操作进行了抽象, 便于对各类数据库(包括关系型数据库和NoSql数据库)采用同一套NoSql操作进行数据访问, 在该包中实现了MongoDB、Sqlite、MySQL、Postgresql的驱动适配, 可以根据自己的需要实现其他数据库的适配实现。
 
 
 ## 安装方法
@@ -18,6 +18,23 @@ HiveNetNoSql是一个通用的NoSql数据访问驱动框架, 参考MongoDB的语
 4、执行安装命令：python setup.py install
 
 PIPY安装：pip install HiveNetNoSql
+
+注意: 包依赖并未安装相应的驱动, 因此如果需要使用包中封装的驱动, 需在安装包时同步安装对应的驱动, 例如：
+
+```
+# 同时安装mongodb驱动
+pip install HiveNetNoSql motor
+
+# 同时安装sqlite驱动
+pip install HiveNetNoSql aiosqlite
+
+# 同时安装mysql驱动
+pip install HiveNetNoSql aiomysql
+
+# 同时安装postgresql驱动, 注意该驱动暂时不支持M1版本的mac, 如果是M1版本改为安装同步的psycopg2-binary驱动
+pip install HiveNetNoSql psycopg
+```
+
 
 
 - 安装包打包（2种方式）
@@ -49,6 +66,15 @@ mongo模块基于motor异步IO驱动提供了MongoDB的NosqlDriver实现类Mongo
 ### sqlite
 
 sqlite模块基于aiosqlite异步IO驱动提供了SQLite的NosqlDriver实现类SQLiteNosqlDriver, 可基于SQLite数据库来进行NoSQL数据访问处理。
+
+### mysql
+
+mysql模块基于aiomysql异步IO驱动提供了MySQL的NosqlDriver实现类MySQLNosqlDriver, 可基于MySQL数据库来进行NoSQL数据访问处理。
+
+### pgsql
+
+pgsql模块基于psycopg 3异步IO驱动提供了Postgresql的NosqlDriver实现类MySQLNosqlDriver, 可基于Postgresql数据库来进行NoSQL数据访问处理。
+注：psycopg 3暂时未发布M1版本的MacOS的版本, 因此实现的是psycopg2的同步IO驱动。
 
 
 

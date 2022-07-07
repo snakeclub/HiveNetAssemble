@@ -20,6 +20,7 @@ import traceback
 from bson.objectid import ObjectId
 from typing import Union, Any
 from HiveNetCore.utils.run_tool import AsyncTools
+from HiveNetCore.utils.test_tool import TestTool
 from HiveNetCore.connection_pool import AIOConnectionPool
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(
@@ -507,6 +508,81 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
     """
 
     #############################
+    # 静态工具函数 - 通用查询结果比较函数
+    #############################
+    @classmethod
+    def cmp_func_equal_value(cls, query_ret, cmp_val: Any) -> bool:
+        """
+        比较函数-与查询结果第1行第1个值与比较值相等
+
+        @param {list} query_ret - 查询返回结果
+        @param {Any} cmp_val - 比较值
+
+        @returns {bool} - 比较结果(True代表通过)
+        """
+        if query_ret is None or len(query_ret) == 0:
+            return False
+
+        _type = type(cmp_val)
+        _ret_val = list(query_ret[0].values())[0]
+        if _type == dict:
+            return TestTool.cmp_dict(_ret_val, cmp_val, print_if_diff=False)
+        elif _type in (list, tuple):
+            return TestTool.cmp_list(_ret_val, cmp_val, print_if_diff=False)
+        else:
+            return _ret_val == cmp_val
+
+    @classmethod
+    def cmp_func_equal_row(cls, query_ret, cmp_val: dict) -> bool:
+        """
+        比较函数-与查询结果第1行结果比较字典
+
+        @param {list} query_ret - 查询返回结果
+        @param {dict} cmp_val - 比较字典值
+
+        @returns {bool} - 比较结果(True代表通过)
+        """
+        if query_ret is None:
+            if cmp_val is None:
+                return True
+            else:
+                return False
+        else:
+            return TestTool.cmp_dict(query_ret[0], cmp_val, print_if_diff=False)
+
+    @classmethod
+    def cmp_func_lt_value(cls, query_ret, cmp_val: Any) -> bool:
+        """
+        比较函数-查询结果第1行第1个值小于比较值
+
+        @param {list} query_ret - 查询返回结果
+        @param {Any} cmp_val - 比较值
+
+        @returns {bool} - 比较结果(True代表通过)
+        """
+        if query_ret is None or len(query_ret) == 0:
+            return False
+
+        _ret_val = list(query_ret[0].values())[0]
+        return _ret_val < cmp_val
+
+    @classmethod
+    def cmp_func_gt_value(cls, query_ret, cmp_val: Any) -> bool:
+        """
+        比较函数-查询结果第1行第1个值大于比较值
+
+        @param {list} query_ret - 查询返回结果
+        @param {Any} cmp_val - 比较值
+
+        @returns {bool} - 比较结果(True代表通过)
+        """
+        if query_ret is None or len(query_ret) == 0:
+            return False
+
+        _ret_val = list(query_ret[0].values())[0]
+        return _ret_val > cmp_val
+
+    #############################
     # 构造函数
     #############################
     def __init__(self, connect_config: dict = {}, pool_config: dict = {}, driver_config: dict = {}):
@@ -522,6 +598,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             dbname {str} - 登录用户的数据库名(可选)
             connect_on_init {bool} - 是否启动时直接连接数据库, 默认为False(等待第一次操作再连接)
             connect_timeout {float} - 连接数据库的超时时间, 单位为秒, 默认为20
+            default_str_len {int} - 默认的字符串类型长度, 默认为30
             ...驱动实现类自定义支持的参数
             transaction_share_cursor {bool} - 进行事务处理是否复用同一个游标对象, 默认为True
         @param {dict} pool_config={} - 连接池配置
@@ -555,6 +632,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         """
         # 公共参数处理
         self._driver_config = copy.deepcopy(driver_config)
+        self._default_str_len = connect_config.get('default_str_len', 30)
         self._transaction_share_cursor = connect_config.get('transaction_share_cursor', True)
         self._logger = driver_config.get('logger', None)
         if self._logger is None:
@@ -579,6 +657,16 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             connect_method_name=_creator_infos.get('connect_method_name', None),
             **_pool_config
         )
+
+        # 是否启动时直接连接数据库
+        if connect_config.get('connect_on_init', False):
+            # 获取连接, 然后关闭, 相当于验证连接
+            _conn = AsyncTools.sync_run_coroutine(self._get_connection())
+            AsyncTools.sync_run_coroutine(_conn.close())
+
+        # 获取正确的数据库名(利用db_name的属性获取)
+        if self._db_name is None:
+            self._db_name = self.db_name
 
         # 启动后创建数据库
         _temp_db_name = self._db_name
@@ -625,7 +713,10 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         返回当前数据库名
         @property {str}
         """
-        return self._db_name
+        if self._db_name is None:
+            return AsyncTools.sync_run_coroutine(self._get_current_db_name())
+        else:
+            return self._db_name
 
     #############################
     # 数据库操作
@@ -637,11 +728,11 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         @param {str} name - 数据库名
         """
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls('create_db', name, *args, **kwargs)
         )
         await self._execute_sqls(
-            _sqls, paras=_sql_paras, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
         await self.switch_db(name)
 
@@ -651,11 +742,11 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         @param {str} name - 数据库名
         """
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls('switch_db', name)
         )
         await self._execute_sqls(
-            _sqls, paras=_sql_paras, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
         self._db_name = name
 
@@ -665,11 +756,11 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         @returns {list} - 数据库名清单
         """
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls('list_dbs')
         )
         _ret = await self._execute_sqls(
-            _sqls, paras=_sql_paras, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
         # 需要将字典形式的列表转换为数据库名列表, 注意查询结果的字段名必须为name
         return [_db['name'] for _db in _ret]
@@ -680,11 +771,11 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         @param {str} name - 数据库名
         """
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls('drop_db', name)
         )
         await self._execute_sqls(
-            _sqls, paras=_sql_paras, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
 
         # 切换后判断是不是删除当前数据库
@@ -726,13 +817,13 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
                 ...
             }
         """
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'create_collection', collection, indexs=indexs, fixed_col_define=fixed_col_define
             )
         )
         return await self._execute_sqls(
-            _sqls, paras=_sql_paras, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
 
     async def list_collections(self, filter: dict = None) -> list:
@@ -744,11 +835,11 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         @returns {list} - 集合(表)清单
         """
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls('list_collections', filter=filter)
         )
         _ret = await self._execute_sqls(
-            _sqls, paras=_sql_paras, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
         # 需要将字典形式的列表转换为数据库名列表, 注意查询结果的字段名必须为name
         return [_tab['name'] for _tab in _ret]
@@ -760,7 +851,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         @param {str} collection - 集合名(表名)
         """
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls('drop_collection', collection)
         )
         # 设置固定的参数
@@ -768,7 +859,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             'is_query': False, 'commit_on_finished': True, 'rollback_on_exception': True
         })
         return await self._execute_sqls(
-            _sqls, paras=_sql_paras, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
 
     async def turncate_collection(self, collection: str):
@@ -777,11 +868,11 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         @param {str} collection - 集合名(表名)
         """
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls('turncate_collection', collection)
         )
         return await self._execute_sqls(
-            _sqls, paras=_sql_paras, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
 
     async def collections_exists(self, collection: str) -> bool:
@@ -896,14 +987,14 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _fixed_col_define = await self._get_fixed_col_define(collection, session=session)
 
         # 获取执行sql
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'insert_one', collection, _row, fixed_col_define=_fixed_col_define
             )
         )
         _execute_paras.update(_upd_execute_paras)
         _ret = await self._execute_sqls(
-            _sqls, paras=_sql_paras, conn=_conn, cursor=_cursor, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, conn=_conn, cursor=_cursor, **_execute_paras
         )
         if _ret == 1:
             return _id
@@ -946,24 +1037,57 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _msqls = []
         _msql_paras = []
         _mexecute_paras = {}
+        _mchecks = None
+        _mis_query = None
         for _s_row in rows:
             # 处理_id
             _row = copy.copy(_s_row)  # 浅复制即可
             if _row.get('_id', None) is None:
                 _row['_id'] = str(ObjectId())
 
-            _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+            _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
                 self._generate_sqls(
                     'insert_one', collection, _row, fixed_col_define=_fixed_col_define
                 )
             )
+            # 语句检查参数
+            if _checks is not None:
+                if _mchecks is None:
+                    _mchecks = [None for _temp in _msqls]  # 生成检查列表
+                _mchecks.extend(_checks)
+
+            # 是否查询参数
+            if _execute_paras.get('is_query', None) is not None:
+                _is_query = _execute_paras['is_query']
+                if type(_is_query) in (list, tuple):
+                    # 是列表的情况, 需要扩充
+                    if _mis_query is None:
+                        _mis_query = [False for _temp in _msqls]  # 生成查询列表
+                    _mis_query.extend(_is_query)
+                elif _is_query:
+                    # 最后一个要查询
+                    if _mis_query is not None:
+                        _mis_query.extend([False for _temp in _sqls[: -1]])
+                        _mis_query.append(True)
+                else:
+                    # 最后一个非查询
+                    if _mis_query is not None:
+                        _mis_query.extend([False for _temp in _sqls])
+            else:
+                # 没有指定, 对于列表情况需要扩充
+                if _mis_query is not None:
+                    _mis_query.extend([False for _temp in _sqls])
+
             _msqls.extend(_sqls)
             _msql_paras.extend(_sql_paras)
             _mexecute_paras = _execute_paras
 
         _mexecute_paras.update(_upd_execute_paras)
+        if _mis_query is not None:
+            _mexecute_paras['is_query'] = _mis_query
+
         await self._execute_sqls(
-            _msqls, paras=_msql_paras, conn=_conn, cursor=_cursor, **_mexecute_paras
+            _msqls, paras=_msql_paras, checks=_mchecks, conn=_conn, cursor=_cursor, **_mexecute_paras
         )
         return len(rows)
 
@@ -980,6 +1104,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             {'$mul': {'age': 2, ...}} : age = age * 2, 对数字类型字段, 在现有值上乘以指定数值
             {'$min': {'age': 10, ...}} : age = min(age, 10), 将现有值和给出值比较, 设置为小的值
             {'$max': {'age': 10, ...}} : age = max(age, 10), 将现有值和给出值比较, 设置为大的值
+            注: min和max当遇到字段不存在或为null时, 则直接设置为比较值
             {'$unset': {'job': 1}}: job=null, 删除指定字段
             {'$rename': {'old_name': 'new_name', ...}}: 将字段名修改为新字段名
         @param {bool} multi=True - 是否更新全部找到的记录, 如果为Fasle只更新找到的第一条记录
@@ -1030,7 +1155,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         if not _no_match:
             # 执行更新操作
-            _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+            _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
                 self._generate_sqls(
                     'update', collection, _filter, update, multi=multi, upsert=upsert, hint=hint,
                     fixed_col_define=_fixed_col_define
@@ -1038,7 +1163,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             )
             _execute_paras.update(_upd_execute_paras)
             _ret = await self._execute_sqls(
-                _sqls, paras=_sql_paras, conn=_conn, cursor=_cursor, **_execute_paras
+                _sqls, paras=_sql_paras, checks=_checks, conn=_conn, cursor=_cursor, **_execute_paras
             )
             if _ret > 0:
                 # 更新成功
@@ -1073,7 +1198,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         @param {str} collection - 集合(表)
         @param {dict} filter - 查询条件字典, 与mongodb的查询条件设置参数一致
-        @param {bool} multi=True - 是否更新全部找到的记录, 如果为Fasle只更新找到的第一条记录
+        @param {bool} multi=True - 是否删除全部找到的记录, 如果为Fasle只删除找到的第一条记录
         @param {dict} hint=None - 指定查询使用索引的名字清单
         @param {Any} session=None - 指定事务连接对象
 
@@ -1118,7 +1243,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
                 _filter = {'_id': _ret[0]['_id']}
 
         # 获取并执行删除语句
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'delete', collection, _filter, multi=multi, hint=hint,
                 fixed_col_define=_fixed_col_define
@@ -1127,7 +1252,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         _execute_paras.update(_upd_execute_paras)
         return await self._execute_sqls(
-            _sqls, paras=_sql_paras, conn=_conn, cursor=_cursor, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, conn=_conn, cursor=_cursor, **_execute_paras
         )
 
     #############################
@@ -1187,7 +1312,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _fixed_col_define = await self._get_fixed_col_define(collection, session=session)
         _filter = {} if filter is None else filter
 
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query', collection, filter=_filter, projection=projection, sort=sort,
                 skip=skip, limit=limit, hint=hint, fixed_col_define=_fixed_col_define
@@ -1196,7 +1321,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         # 更新执行sql的参数
         _execute_paras.update(_upd_execute_paras)
         return await self._execute_sqls(
-            _sqls, paras=_sql_paras, conn=_conn, cursor=_cursor, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, conn=_conn, cursor=_cursor, **_execute_paras
         )
 
     async def query_iter(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
@@ -1253,12 +1378,13 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _fixed_col_define = await self._get_fixed_col_define(collection, session=session)
         _filter = {} if filter is None else filter
 
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query', collection, filter=_filter, projection=projection, sort=sort,
                 skip=skip, limit=limit, hint=hint, fixed_col_define=_fixed_col_define
             )
         )
+        _execute_is_query = _execute_paras.get('is_query', True)
         _execute_paras.update(_upd_execute_paras)
 
         if _cursor is None:
@@ -1266,28 +1392,61 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             _cursor = await AsyncTools.async_run_coroutine(_conn.cursor())
 
         try:
-            # 获取最后一个语句
-            _last_sql = _sqls.pop(-1)
-            _last_paras = None if _sql_paras is None else _sql_paras.pop(-1)
+            # 上一个语句执行结果和是否异常的标识
+            _prev_return = None
+            _prev_error = False
 
-            # 遍历执行前面的语句
+            # 遍历执行语句
             _index = 0
+            _lask_index = len(_sqls) - 1
             for _sql in _sqls:
+                # 参数准备
+                _is_last = (_index >= _lask_index)
                 _sql_paras = None if _sql_paras is None else _sql_paras[_index]
-                _index += 1
-                await self._execute_sql(
-                    _sql, paras=_sql_paras, is_query=False, conn=_conn, cursor=_cursor,
-                    commit_on_finished=False, rollback_on_exception=False,
-                    close_cursor=False, close_conn=False
-                )
+                _run_check = {}
+                if _checks is not None and _checks[_index] is not None:
+                    _run_check = _checks[_index]
 
-            # 执行最后一个语句
-            _ret = self._execute_sql_query_iter(
-                _last_sql, paras=_last_paras, fetch_each=fetch_each, conn=_conn, cursor=_cursor,
-                commit_on_finished=False, rollback_on_exception=False,
-                close_cursor=False, close_conn=False
-            )
-            async for _rows in _ret:
+                _is_query = False
+                if type(_execute_is_query) in (list, tuple):
+                    _is_query = _execute_is_query[_index]
+                elif _is_last:
+                    _is_query = True
+
+                _index += 1  # 跳转下一个标识
+
+                # 执行前判断
+                if not self._execute_sql_pre_check(_run_check, _prev_return, _prev_error):
+                    # 检查不通过, 跳过执行, 当作空执行成功
+                    _prev_return = None
+                    _prev_error = False
+                    continue
+
+                try:
+                    if _is_last:
+                        # 最后一个查询
+                        _prev_return = self._execute_sql_query_iter(
+                            _sql, paras=_sql_paras, fetch_each=fetch_each, conn=_conn, cursor=_cursor,
+                            commit_on_finished=False, rollback_on_exception=False,
+                            close_cursor=False, close_conn=False
+                        )
+                    else:
+                        _prev_return = await self._execute_sql(
+                            _sql, paras=_sql_paras, is_query=_is_query, conn=_conn, cursor=_cursor,
+                            commit_on_finished=False, rollback_on_exception=False,
+                            close_cursor=False, close_conn=False
+                        )
+
+                    _prev_error = False
+                except:
+                    _prev_error = True
+                    _prev_return = None
+                    if not _run_check.get('after_check', {}).get('ignore_current_error', False):
+                        # 不忽略执行异常
+                        raise
+
+            # 最后一个语句为异步迭代器
+            async for _rows in _prev_return:
                 yield _rows
 
             # 判断是否需要自动提交
@@ -1347,7 +1506,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _fixed_col_define = await self._get_fixed_col_define(collection, session=session)
         _filter = {} if filter is None else filter
 
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query_count', collection, filter=_filter, skip=skip, limit=limit, hint=hint,
                 fixed_col_define=_fixed_col_define
@@ -1357,7 +1516,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         # 更新执行sql的参数
         _execute_paras.update(_upd_execute_paras)
         _ret = await self._execute_sqls(
-            _sqls, paras=_sql_paras, conn=_conn, cursor=_cursor, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, conn=_conn, cursor=_cursor, **_execute_paras
         )
 
         # 返回第0行第0个记录
@@ -1408,7 +1567,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _fixed_col_define = await self._get_fixed_col_define(collection, session=session)
         _filter = {} if filter is None else filter
 
-        _sqls, _sql_paras, _execute_paras = await AsyncTools.async_run_coroutine(
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query_group_by', collection, group=group, filter=_filter, projection=projection,
                 sort=sort, fixed_col_define=_fixed_col_define
@@ -1417,7 +1576,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         _execute_paras.update(_upd_execute_paras)
         return await self._execute_sqls(
-            _sqls, paras=_sql_paras, conn=_conn, cursor=_cursor, **_execute_paras
+            _sqls, paras=_sql_paras, checks=_checks, conn=_conn, cursor=_cursor, **_execute_paras
         )
 
     #############################
@@ -1505,16 +1664,64 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         return _conn
 
-    async def _execute_sqls(self, sqls: list, paras: list = None, is_query: bool = False,
-            conn: Any = None, cursor: Any = None,
+    def _execute_sql_pre_check(self, pre_check: dict, prev_return: Any, prev_error: bool) -> bool:
+        """
+        执行SQL语句数组前检查函数
+
+        @param {dict} pre_check - 检查字典
+            {
+                'skip_when_prev_error': False,  # 是否当上一条语句异常时跳过当前语句执行, 默认为False
+                # # 默认为None忽略当前参数, 使用cmp_val与上一条执行语句的返回值比较
+                # (如果传入func比较函数或lamba, 则使用比较函数来处理, 否则默认使用self.cmp_func_equal_first_value比较),
+                # 比较结果为True则执行当前语句, 为False则跳过当前语句
+                'cmp_prev_return': [cmp_val, func]
+            }
+        @param {Any} prev_return - 上一语句返回结果
+        @param {bool} prev_error - 上一结果是否异常
+
+        @returns {bool} - 检查结果, True为通过, False为跳过
+        """
+        if pre_check is None:
+            # 没有检查参数
+            return True
+
+        # 是否当上一条语句异常时跳过当前语句执行
+        if prev_error and pre_check.get('skip_when_prev_error', False):
+            return False
+
+        # 与上一返回值的比较
+        if pre_check.get('cmp_prev_return', None) is not None:
+            _cmp_val = pre_check['cmp_prev_return'][0]
+            if len(pre_check['cmp_prev_return']) < 2 or pre_check['cmp_prev_return'][1] is None:
+                _func = self.cmp_func_equal_first_value
+            else:
+                _func = pre_check['cmp_prev_return'][1]
+
+            if not _func(prev_return, _cmp_val):
+                return False
+
+        return True
+
+    async def _execute_sqls(self, sqls: list, paras: list = None, checks: list = None,
+            is_query: bool = False, conn: Any = None, cursor: Any = None,
             commit_on_finished: bool = True, rollback_on_exception: bool = True,
             close_cursor: bool = False, close_conn: bool = False):
         """
         执行SQL语句
 
         @param {list} sqls - 要执行的SQL语句数组
-        @param {list} paras=None - 传入的SQL参数字典(支持?占位)
-        @param {bool} is_query=False - 指定语句是否查询(最后一个语句使用参数)
+        @param {list} paras=None - 传入的SQL参数数组(支持?占位)
+        @param {list} checks=None - SQL语句的检查列表, 如果设置了必须于sqls对应, 每个sql的检查值为:
+            {
+                'pre_check': {
+                    . # 执行前检查, 支持的参数见self._execute_sql_pre_check的定义
+                },
+                'after_check': {  # 执行后检查
+                    'ignore_current_error': False,  # 是否忽略当前语句异常, 默认为False
+                }
+            }
+        @param {bool|list} is_query=False - 指定语句是否查询(最后一个语句使用参数)
+            注: 如果传入的是list, 则代表指定每个语句是否查询
         @param {Any} conn=None - 传入的已打开连接, 如果传入代表纳入事务处理
         @param {Any} cursor=None - 传入的已有游标, 不传入将自动创建新游标, 如果传入该值必须也传入conn
         @param {bool} commit_on_finished=True - 完成处理时是否执行commit操作
@@ -1547,33 +1754,56 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             _cursor = await AsyncTools.async_run_coroutine(_conn.cursor())
 
         try:
-            # 获取最后一个语句
-            _last_sql = sqls.pop(-1)
-            _last_paras = None if paras is None else paras.pop(-1)
+            # 上一个语句执行结果和是否异常的标识
+            _prev_return = None
+            _prev_error = False
 
-            # 遍历执行前面的语句
+            # 遍历执行语句
             _index = 0
+            _last_index = len(sqls) - 1
             for _sql in sqls:
+                # 参数准备
                 _sql_paras = None if paras is None else paras[_index]
-                _index += 1
-                await self._execute_sql(
-                    _sql, paras=_sql_paras, is_query=False, conn=_conn, cursor=_cursor,
-                    commit_on_finished=False, rollback_on_exception=False,
-                    close_cursor=False, close_conn=False
-                )
+                _run_check = {}
+                if checks is not None and checks[_index] is not None:
+                    _run_check = checks[_index]
 
-            # 执行最后一个语句
-            _ret = await self._execute_sql(
-                _last_sql, paras=_last_paras, is_query=is_query,
-                conn=_conn, cursor=_cursor, commit_on_finished=False, rollback_on_exception=False,
-                close_cursor=False, close_conn=False
-            )
+                _is_query = False
+                if type(is_query) in (list, tuple):
+                    _is_query = is_query[_index]
+                elif _index >= _last_index:
+                    # 最后一个
+                    _is_query = is_query
+
+                _index += 1  # 跳转下一个标识
+
+                # 执行前判断
+                if not self._execute_sql_pre_check(_run_check.get('pre_check', None), _prev_return, _prev_error):
+                    # 检查不通过, 跳过执行, 当作空执行成功
+                    _prev_return = None
+                    _prev_error = False
+                    continue
+
+                try:
+                    _prev_return = await self._execute_sql(
+                        _sql, paras=_sql_paras, is_query=_is_query,
+                        conn=_conn, cursor=_cursor,
+                        commit_on_finished=False, rollback_on_exception=False,
+                        close_cursor=False, close_conn=False
+                    )
+                    _prev_error = False
+                except:
+                    _prev_return = None
+                    _prev_error = True
+                    if not _run_check.get('after_check', {}).get('ignore_current_error', False):
+                        # 不忽略执行异常
+                        raise
 
             # 判断是否需要自动提交
             if commit_on_finished:
                 await AsyncTools.async_run_coroutine(_conn.commit())
 
-            return _ret
+            return _prev_return
         except:
             # 出现异常, 判断是否要回滚
             if rollback_on_exception:
@@ -1858,10 +2088,11 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         @param {args} - 要执行操作函数的固定位置入参
         @param {kwargs} - 要执行操作函数的kv入参
 
-        @returns {tuple} - 返回要执行的sql信息(sqls, sql_paras, execute_paras)
+        @returns {tuple} - 返回要执行的sql信息(sqls, sql_paras, execute_paras, checks)
             sqls: list, 要顺序执行的sql语句数组; 注意, 仅最后一个语句支持为查询语句, 前面的语句都必须为非查询语句
             sql_paras: list, 传入的SQL参数字典(支持?占位), 注意必须与sqls数组一一对应(如果只有个别语句需要传参, 其他位置设置为None; 如果全部都无需传参, 该值直接传None)
             execute_paras: dict, 最后一个SQL语句的执行参数 {'is_query': ...}
+            checks: list, 传入每个语句执行检查字典列表, 注意必须与sqls数组一一对应(如果只有个别语句需要传参, 其他位置设置为None; 如果全部都无需传参, 该值直接传None)
         """
         raise NotImplementedError()
 
@@ -1900,3 +2131,13 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         @returns {list} - 字典形式的列信息数组, 注意列名为name, 类型为type(类型应为标准类型: str, int, float, bool, json)
         """
         return []
+
+    async def _get_current_db_name(self, session: Any = None) -> str:
+        """
+        获取当前数据库名
+
+        @param {Any} session=None - 指定事务连接对象
+
+        @returns {str} - 数据库名
+        """
+        return None

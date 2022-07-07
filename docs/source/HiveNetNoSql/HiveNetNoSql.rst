@@ -16,6 +16,8 @@ Submodules
    :maxdepth: 4
 
    HiveNetNoSql.mongo
+   HiveNetNoSql.mysql
+   HiveNetNoSql.pgsql
    HiveNetNoSql.sqlite
 
 Module contents

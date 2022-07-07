@@ -18,9 +18,21 @@ import logging
 from bson import ObjectId
 from typing import Any, Union
 from urllib.parse import quote_plus
-from motor.motor_asyncio import AsyncIOMotorClient
-from pymongo import IndexModel, ASCENDING, DESCENDING
 from HiveNetCore.utils.run_tool import AsyncTools
+# 自动安装依赖库
+from HiveNetCore.utils.pyenv_tool import PythonEnvTools
+process_install_motor = False
+while True:
+    try:
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from pymongo import IndexModel, ASCENDING, DESCENDING
+        break
+    except ImportError:
+        if process_install_motor:
+            break
+        else:
+            PythonEnvTools.install_package('motor')
+            process_install_motor = True
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 from HiveNetNoSql.base.driver_fw import NosqlDriverFW
@@ -412,16 +424,20 @@ class MongoNosqlDriver(NosqlDriverFW):
 
         @returns {int} - 返回更新的数据条数
         """
-        self._std_filter(filter)  # 标准化filter字典
+        _filter = filter
+        self._std_filter(_filter)  # 标准化filter字典
+        if _filter is None:
+            _filter = {}
+
         if multi:
             # 更新全部记录
             _result = await self._db.get_collection(collection).update_many(
-                filter, update, upsert=upsert, hint=hint, session=session
+                _filter, update, upsert=upsert, hint=hint, session=session
             )
         else:
             # 更新单个记录
             _result = await self._db.get_collection(collection).update_one(
-                filter, update, upsert=upsert, hint=hint, session=session
+                _filter, update, upsert=upsert, hint=hint, session=session
             )
 
         return _result.modified_count

@@ -16,6 +16,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.
 from HiveNetNoSql.base.driver_fw import NosqlDriverFW
 from HiveNetNoSql.sqlite import SQLiteNosqlDriver
 from HiveNetNoSql.mongo import MongoNosqlDriver
+from HiveNetNoSql.mysql import MySQLNosqlDriver
+from HiveNetNoSql.pgsql import PgSQLNosqlDriver
 
 
 class DriverTestCaseFW(object):
@@ -29,7 +31,7 @@ class DriverTestCaseFW(object):
     def __init__(self) -> None:
         """
         构造函数
-        注: 需要把驱动对象设置到 self.driver 变量上, 驱动表示设置到 self.driver_id
+        注: 需要把驱动对象设置到 self.driver 变量上, 驱动标识设置到 self.driver_id
         """
         self.driver = NosqlDriverFW()
         self.driver_id = ''
@@ -118,7 +120,9 @@ class DriverTestCaseFW(object):
             'test_query_list_2',
             'test_query_aggregate_3',
             'test_query_aggregate_4',
-            'test_page_1'
+            'test_page_1',
+            'test_data_type_1',
+            'test_special_char2'
         ]
 
     @property
@@ -369,8 +373,17 @@ class DriverTestCaseFW(object):
         # 获取测试库清单
         _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
 
-        # 插入数据
         AsyncTools.sync_run_coroutine(self.driver.switch_db(_test_dbs[0]))
+
+        # 清空表
+        AsyncTools.sync_run_coroutine(self.driver.turncate_collection('tb_full_type'))
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type')
+        )
+        if _ret != 0:
+            return (False, _tips, 'turncate collection error: %s' % str(_ret))
+
+        # 插入数据
         _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
             'tb_full_type', rows=[
                 {'c_index': 'i1', 'c_int': 1, 'n_str': 'ext_str1', 'n_bool': True},
@@ -561,7 +574,7 @@ class DriverTestCaseFW(object):
 
         _ret = AsyncTools.sync_run_coroutine(
             self.driver.query_list(
-                'tb_null', filter={'a1': 'a1v'},
+                'tb_null', filter={'a1': 'a1v', 'a2': 'a2u'},
                 projection=['a2', 'b2', 'a4', 'inc', 'no_inc', 'mul', 'no_mul', 'min', 'no_min', 'max', 'no_max'],
                 limit=1
             )
@@ -612,7 +625,7 @@ class DriverTestCaseFW(object):
         if not TestTool.cmp_dict(_ret[0], {
             'a1': 'no_exists', 'a2': 'a2uu', 'inc': -3, 'no_inc': 3
         }):
-            return (False, _tips, 'uupdate no exists upsert 2 error: %s' % str(_ret))
+            return (False, _tips, 'update no exists upsert 2 error: %s' % str(_ret))
 
         # 插入条件特殊的情况
         _ret = AsyncTools.sync_run_coroutine(self.driver.update(
@@ -669,7 +682,7 @@ class DriverTestCaseFW(object):
 
         _ret = AsyncTools.sync_run_coroutine(
             self.driver.query_list(
-                'tb_full_type', filter={'c_str': 'str1'},
+                'tb_full_type', filter={'c_str': 'str1', 'b2': 'b2u'},
                 projection=['c_bool', 'b2', 'c_int', 'no_inc', 'j_int', 'mul', 'no_mul', 'c_float', 'no_min', 'j_float', 'no_max'],
                 limit=1
             )
@@ -1421,6 +1434,193 @@ class DriverTestCaseFW(object):
         return (True, _tips, '')
 
     #############################
+    # 数据类型及特殊字符相关
+    #############################
+    def test_data_type_1(self):
+        _tips = '数据类型1: 类型存入及获取'
+
+        # 获取测试库清单
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_test_dbs[0]))
+
+        # 清空测试表
+        _table_name = 'tb_full_type'
+        AsyncTools.sync_run_coroutine(self.driver.turncate_collection(_table_name))
+
+        # 插入不同类型的信息
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.insert_many(
+                _table_name, [
+                    {
+                        'c_index': 'i1', 'c_str': 'str1', 'c_str_no_len': 'nostr1', 'c_bool': True, 'c_int': 1,
+                        'c_float': 0.1, 'c_json': {'cj_1': 'cj_str_1', 'cj_2': False},
+                        'n_str': 'nstr1', 'n_int': 10, 'n_bool': True, 'n_float': 3.4,
+                        'n_json': {'nj_col_1': 'nj_val_1', 'nj_col_2': 3}
+                    },
+                ]
+            )
+        )
+        if _ret != 1:
+            return (False, _tips, 'insert test data 1 error: %s' % str(_ret))
+
+        # 检查插入的值和类型
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                _table_name, projection=[
+                    'c_str', 'c_bool', 'c_int', 'c_float', 'c_json',
+                    'n_str', 'n_bool', 'n_int', 'n_float', 'n_json'
+                ]
+            )
+        )
+        # 固定字段的检查
+        if not (type(_ret[0]['c_str']) == str and _ret[0]['c_str'] == 'str1'):
+            return (False, _tips, 'check insert test data c_str error: %s' % str(_ret[0]['c_str']))
+        if not _ret[0]['c_bool']:
+            return (False, _tips, 'check insert test data c_bool error: %s' % str(_ret[0]['c_bool']))
+        if not (type(_ret[0]['c_int']) == int and _ret[0]['c_int'] == 1):
+            return (False, _tips, 'check insert test data c_int error: %s' % str(_ret[0]['c_int']))
+        if not (type(_ret[0]['c_float']) == float and _ret[0]['c_float'] == 0.1):
+            return (False, _tips, 'check insert test data c_float error: %s' % str(_ret[0]['c_float']))
+        if not (type(_ret[0]['c_json']) == dict and TestTool.cmp_dict(_ret[0]['c_json'], {'cj_1': 'cj_str_1', 'cj_2': False})):
+            return (False, _tips, 'check insert test data c_json error: %s' % str(_ret[0]['c_json']))
+
+        # json字段的检查
+        if not (type(_ret[0]['n_str']) == str and _ret[0]['n_str'] == 'nstr1'):
+            return (False, _tips, 'check insert test data n_str error: %s' % str(_ret[0]['n_str']))
+        if not _ret[0]['n_bool']:
+            return (False, _tips, 'check insert test data n_bool error: %s' % str(_ret[0]['n_bool']))
+        if not (type(_ret[0]['n_int']) == int and _ret[0]['n_int'] == 10):
+            return (False, _tips, 'check insert test data n_int error: %s' % str(_ret[0]['n_int']))
+        if not (type(_ret[0]['n_float']) == float and _ret[0]['n_float'] == 3.4):
+            return (False, _tips, 'check insert test data n_float error: %s' % str(_ret[0]['n_float']))
+        if not (type(_ret[0]['n_json']) == dict and TestTool.cmp_dict(_ret[0]['n_json'], {'nj_col_1': 'nj_val_1', 'nj_col_2': 3})):
+            return (False, _tips, 'check insert test data n_json error: %s' % str(_ret[0]['n_json']))
+
+        # 更新不同类型的值
+        _ret = AsyncTools.sync_run_coroutine(self.driver.update(
+            _table_name, filter=None, update={
+                '$set': {
+                    'c_str': 'str1_upd', 'c_bool': False, 'c_int': 2, 'c_float': 0.2,
+                    'c_json': {'cj_1_u': 'cj_str_1', 'cj_2_u': False},
+                    'n_str': 'nstr1_upd', 'n_bool': False, 'n_int': 11, 'n_float': 3.5,
+                    'n_json': {'nj_col_1_u': 'nj_val_1', 'nj_col_2_u': 3}
+                }
+            }
+        ))
+        if _ret != 1:
+            return (False, _tips, 'update 1 error: %s' % str(_ret))
+
+        # 检查插入的值和类型
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                _table_name, projection=[
+                    'c_str', 'c_bool', 'c_int', 'c_float', 'c_json',
+                    'n_str', 'n_bool', 'n_int', 'n_float', 'n_json'
+                ]
+            )
+        )
+        # 固定字段的检查
+        if not (type(_ret[0]['c_str']) == str and _ret[0]['c_str'] == 'str1_upd'):
+            return (False, _tips, 'check update test data c_str error: %s' % str(_ret[0]['c_str']))
+        if _ret[0]['c_bool']:
+            return (False, _tips, 'check update test data c_bool error: %s' % str(_ret[0]['c_bool']))
+        if not (type(_ret[0]['c_int']) == int and _ret[0]['c_int'] == 2):
+            return (False, _tips, 'check update test data c_int error: %s' % str(_ret[0]['c_int']))
+        if not (type(_ret[0]['c_float']) == float and _ret[0]['c_float'] == 0.2):
+            return (False, _tips, 'check update test data c_float error: %s' % str(_ret[0]['c_float']))
+        if not (type(_ret[0]['c_json']) == dict and TestTool.cmp_dict(_ret[0]['c_json'], {'cj_1_u': 'cj_str_1', 'cj_2_u': False})):
+            return (False, _tips, 'check update test data c_json error: %s' % str(_ret[0]['c_json']))
+
+        # json字段的检查
+        if not (type(_ret[0]['n_str']) == str and _ret[0]['n_str'] == 'nstr1_upd'):
+            return (False, _tips, 'check update test data n_str error: %s' % str(_ret[0]['n_str']))
+        if _ret[0]['n_bool']:
+            return (False, _tips, 'check update test data n_bool error: %s' % str(_ret[0]['n_bool']))
+        if not (type(_ret[0]['n_int']) == int and _ret[0]['n_int'] == 11):
+            return (False, _tips, 'check update test data n_int error: %s' % str(_ret[0]['n_int']))
+        if not (type(_ret[0]['n_float']) == float and _ret[0]['n_float'] == 3.5):
+            return (False, _tips, 'check update test data n_float error: %s' % str(_ret[0]['n_float']))
+        if not (type(_ret[0]['n_json']) == dict and TestTool.cmp_dict(_ret[0]['n_json'], {'nj_col_1_u': 'nj_val_1', 'nj_col_2_u': 3})):
+            return (False, _tips, 'check update test data n_json error: %s' % str(_ret[0]['n_json']))
+
+        return (True, _tips, '')
+
+    def test_special_char2(self):
+        _tips = '特殊字符: 转义相关字符'
+
+        # 获取测试库清单
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_test_dbs[0]))
+
+        # 清空测试表
+        _table_name = 'tb_full_type'
+        AsyncTools.sync_run_coroutine(self.driver.turncate_collection(_table_name))
+
+        # 单双引号, 反斜杠, 回车换行, 制表符, 中文
+        _str = 'test \'单引号\' "双引号", 反斜杠\\, 回车:\r, 换行:\n, tab:\t'
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_one(
+            _table_name, {
+                'c_str': _str, 'c_json': {'j_val': _str},
+                'n_str': _str, 'n_json': {'j_val': _str}
+            }
+        ))
+
+        # 检查插入的值
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                _table_name, projection=[
+                    'c_str', 'c_json', 'n_str', 'n_json'
+                ]
+            )
+        )
+        # 固定字段的检查
+        if not (type(_ret[0]['c_str']) == str and _ret[0]['c_str'] == _str):
+            return (False, _tips, 'check insert test data c_str error: %s' % str(_ret[0]['c_str']))
+        if not (type(_ret[0]['c_json']) == dict and TestTool.cmp_dict(_ret[0]['c_json'], {'j_val': _str})):
+            return (False, _tips, 'check insert test data c_json error: %s' % str(_ret[0]['c_json']))
+
+        # json字段的检查
+        if not (type(_ret[0]['n_str']) == str and _ret[0]['n_str'] == _str):
+            return (False, _tips, 'check insert test data n_str error: %s' % str(_ret[0]['n_str']))
+        if not (type(_ret[0]['n_json']) == dict and TestTool.cmp_dict(_ret[0]['n_json'], {'j_val': _str})):
+            return (False, _tips, 'check insert test data n_json error: %s' % str(_ret[0]['n_json']))
+
+        # 更新值
+        _str = '%s new' % _str
+        _ret = AsyncTools.sync_run_coroutine(self.driver.update(
+            _table_name, filter=None, update={
+                '$set': {
+                    'c_str': _str, 'c_json': {'j_val': _str},
+                    'n_str': _str, 'n_json': {'j_val': _str}
+                }
+            }
+        ))
+        if _ret != 1:
+            return (False, _tips, 'update 1 error: %s' % str(_ret))
+
+        # 检查更新的值
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                _table_name, projection=[
+                    'c_str', 'c_json', 'n_str', 'n_json'
+                ]
+            )
+        )
+        # 固定字段的检查
+        if not (type(_ret[0]['c_str']) == str and _ret[0]['c_str'] == _str):
+            return (False, _tips, 'check update test data c_str error: %s' % str(_ret[0]['c_str']))
+        if not (type(_ret[0]['c_json']) == dict and TestTool.cmp_dict(_ret[0]['c_json'], {'j_val': _str})):
+            return (False, _tips, 'check update test data c_json error: %s' % str(_ret[0]['c_json']))
+
+        # json字段的检查
+        if not (type(_ret[0]['n_str']) == str and _ret[0]['n_str'] == _str):
+            return (False, _tips, 'check update test data n_str error: %s' % str(_ret[0]['n_str']))
+        if not (type(_ret[0]['n_json']) == dict and TestTool.cmp_dict(_ret[0]['n_json'], {'j_val': _str})):
+            return (False, _tips, 'check update test data n_json error: %s' % str(_ret[0]['n_json']))
+
+        return (True, _tips, '')
+
+    #############################
     # 分页
     #############################
 
@@ -1630,6 +1830,69 @@ class SQLiteDriverTestCase(DriverTestCaseFW):
         )
 
 
+class MySQLDriverTestCase(DriverTestCaseFW):
+    """
+    通用的驱动测试方法类
+    """
+
+    #############################
+    # 不同驱动自有的测试方法
+    #############################
+    def __init__(self) -> None:
+        """
+        构造函数
+        """
+        self.driver_id = 'MySQL'
+
+        # 创建驱动
+        self.driver = MySQLNosqlDriver(
+            connect_config={
+                'host': '127.0.0.1',
+                'port': 3306,
+                'usedb': 'dev_tf',
+                'username': 'root',
+                'password': '123456'
+            },
+            driver_config={
+                'close_action': 'commit',
+                'init_db': self.init_db,
+                'init_collections': self.init_collections
+            }
+        )
+
+
+class PgSQLDriverTestCase(DriverTestCaseFW):
+    """
+    通用的驱动测试方法类
+    """
+
+    #############################
+    # 不同驱动自有的测试方法
+    #############################
+    def __init__(self) -> None:
+        """
+        构造函数
+        """
+        self.driver_id = 'PgSQL'
+
+        # 创建驱动
+        self.driver = PgSQLNosqlDriver(
+            connect_config={
+                'host': '127.0.0.1',
+                'port': 5432,
+                'usedb': 'public',
+                'username': 'root',
+                'password': '123456',
+                'dbname': 'test_db'
+            },
+            driver_config={
+                'close_action': 'commit',
+                'init_db': self.init_db,
+                'init_collections': self.init_collections
+            }
+        )
+
+
 class MongoDriverTestCase(DriverTestCaseFW):
     """
     MongoDB的驱动测试方法类
@@ -1672,8 +1935,67 @@ class MongoDriverTestCase(DriverTestCaseFW):
 class TestSQLiteDriver(unittest.TestCase):
 
     def test(self):
+        # return
         # 初始化驱动
         _case = SQLiteDriverTestCase()
+
+        try:
+            # 执行自有测试案例
+            for _fun_name in _case.self_test_order:
+                _fun = getattr(_case, _fun_name)
+                _is_success, _tips, _show_info = _fun()
+                self.assertTrue(_is_success, msg='%s -> self case[%s] %s error: %s' % (
+                    _case.driver_id, _fun_name, _tips, str(_show_info))
+                )
+
+            # 执行通用测试案例
+            for _fun_name in _case.common_test_order:
+                _fun = getattr(_case, _fun_name)
+                _is_success, _tips, _show_info = _fun()
+                self.assertTrue(_is_success, msg='%s -> common case[%s] %s error: %s' % (
+                    _case.driver_id, _fun_name, _tips, str(_show_info))
+                )
+
+        finally:
+            # 销毁连接
+            _case.destroy()
+
+
+class TestMySQLDriver(unittest.TestCase):
+
+    def test(self):
+        return
+        # 初始化驱动
+        _case = MySQLDriverTestCase()
+
+        try:
+            # 执行自有测试案例
+            for _fun_name in _case.self_test_order:
+                _fun = getattr(_case, _fun_name)
+                _is_success, _tips, _show_info = _fun()
+                self.assertTrue(_is_success, msg='%s -> self case[%s] %s error: %s' % (
+                    _case.driver_id, _fun_name, _tips, str(_show_info))
+                )
+
+            # 执行通用测试案例
+            for _fun_name in _case.common_test_order:
+                _fun = getattr(_case, _fun_name)
+                _is_success, _tips, _show_info = _fun()
+                self.assertTrue(_is_success, msg='%s -> common case[%s] %s error: %s' % (
+                    _case.driver_id, _fun_name, _tips, str(_show_info))
+                )
+
+        finally:
+            # 销毁连接
+            _case.destroy()
+
+
+class TestPgSQLDriver(unittest.TestCase):
+
+    def test(self):
+        return
+        # 初始化驱动
+        _case = PgSQLDriverTestCase()
 
         try:
             # 执行自有测试案例
@@ -1700,6 +2022,7 @@ class TestSQLiteDriver(unittest.TestCase):
 class TestMongoDriver(unittest.TestCase):
 
     def test(self):
+        return
         # 初始化驱动
         _case = MongoDriverTestCase()
 

@@ -15,6 +15,7 @@ Python运行环境的工具类
 import sys
 import os
 import site
+import subprocess
 
 __MOUDLE__ = 'pyenv_tool'  # 模块名
 __DESCRIPT__ = u'Python运行环境的工具类'  # 模块描述
@@ -61,6 +62,64 @@ class PythonEnvTools(object):
         _site_packages_path = cls.get_site_packages_path()
         _filename = '%s.pth' % name
         os.remove(os.path.join(_site_packages_path, _filename))
+
+    @classmethod
+    def install_package(cls, package_name: str, force_reinstall: bool = False, mirror: str = None) -> tuple:
+        """
+        安装指定依赖包
+
+        @param {str} package_name - 要安装的包名
+            注: 可以包含版本, 例如 redis==xxxx
+        @param {bool} force_reinstall=False - 是否强制重新安装
+        @param {str} mirror=None - 使用镜像地址
+
+        @returns {tuple[int, str]} - 安装结果
+            第一位为运行结果, 0代表成本, 其他代表失败
+            第二位为命令安装结果输出内容
+        """
+        _result = subprocess.getstatusoutput(
+            'pip install %s%s%s' % (
+                '--force-reinstall ' if force_reinstall else '',
+                package_name,
+                ' -i %s' % mirror if mirror is not None else ''
+            )
+        )
+        if _result[0] == 0:
+            # 安装成功
+            print('安装依赖包 %s 成功' % package_name)
+        else:
+            # 安装失败
+            print('安装依赖包 %s 失败\n%s\n' % (package_name, _result))
+
+        return _result
+
+    @classmethod
+    def install_packages(cls, package_list: list, force_reinstall: bool = False, mirror: str = None) -> bool:
+        """
+        安装指定依赖包清单
+
+        @param {list} package_list - 要安装的包名清单
+            注: 可以包含版本, 例如 ['redis==xxxx', ...]
+        @param {bool} force_reinstall=False - 是否强制重新安装
+        @param {str} mirror=None - 使用镜像地址
+
+        @returns {bool} - 安装结果
+        """
+        _fail_list = []
+        for _key in package_list.keys():
+            _result = cls.install_package(
+                _key, force_reinstall=force_reinstall, mirror=mirror
+            )
+            if _result[0] != 0:
+                # 安装失败
+                _fail_list.append(_key)
+
+        # 打印最后结果
+        if len(_fail_list) > 0:
+            print('以下依赖包安装失败: %s' % ', '.join(_fail_list))
+            return False
+        else:
+            return True
 
 
 if __name__ == '__main__':

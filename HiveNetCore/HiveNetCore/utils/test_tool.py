@@ -19,6 +19,8 @@ import sys
 import os
 import json
 import operator
+
+from numpy import double
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(
     os.path.dirname(__file__), os.path.pardir, os.path.pardir)))
@@ -91,7 +93,8 @@ class TestTool(object):
         return is_same
 
     @classmethod
-    def cmp_dict(cls, src_data, dst_data, list_sorted: bool = False, print_if_diff=True):
+    def cmp_dict(cls, src_data, dst_data, list_sorted: bool = False, print_if_diff=True,
+            ignore_number_type: bool = False):
         """
         比较两个字典是否一致
 
@@ -99,6 +102,7 @@ class TestTool(object):
         @param {string/dict} dst_data - 第2个字典对象( 或对象JSON字符串)
         @param {bool} list_sorted=False - 值为列表时先排序再比较
         @param {bool} print_if_diff=True - 当两个字典不一致时是否打印对象信息
+        @param {bool} ignore_number_type=Fasle - 如果是数字, 是否忽略数据类型
 
         @returns {bool} - True-两个字典一致, False-两个字典不一致
 
@@ -133,11 +137,18 @@ class TestTool(object):
                             break
                     else:
                         # 一般值
-                        if src_data[key] != dst_data[key]:
-                            # print(src_data1[key])
-                            print('cmp_dict: value difference in key "%s"!' % (key))
-                            is_break = True
-                            break
+                        if type(src_data[key]) in (int, float) and ignore_number_type:
+                            # 数字忽略类型
+                            if float(src_data[key]) != float(dst_data[key]):
+                                print('cmp_dict: value difference in key "%s"!' % (key))
+                                is_break = True
+                                break
+                        else:
+                            if src_data[key] != dst_data[key]:
+                                # print(src_data1[key])
+                                print('cmp_dict: value difference in key "%s"!' % (key))
+                                is_break = True
+                                break
 
                 if not is_break:
                     # 如果没有中断过, 则代表比较成功
