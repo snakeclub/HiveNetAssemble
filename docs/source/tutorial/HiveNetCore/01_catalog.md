@@ -64,17 +64,17 @@ PIPY安装：pip install HiveNetCore
 
 [i18n](04_i18n.md)是一个简单用于python的多国语言支持的模块，可以根据多国语言信息的配置实现语言的翻译转换。
 
-#### logging
+#### logging_hivenet
 
-[logging](05_logging_hivenet.md)模块重新封装了python的logging模块，提供一个更便于使用的日志处理类。
+[logging_hivenet](05_logging_hivenet.md)模块重新封装了python的logging模块，提供一个更便于使用的日志处理类。
 
 #### parallel
 
 [parallel](06_parallel.md)是并行任务（多线程、多进程）的处理框架和实现，包括并行任务处理，以及并行池（类似线程池或进程池）管理的封装，同时该框架可以支持扩展为分布式的并行任务处理（按框架定义实现对应的实现类即可）。
 
-#### queue
+#### queue_hivenet
 
-[queue](07_queue_hivenet.md)框架基于Python原生的队列库（queue）的模式定义了队列处理的基本框架类（QueueFw），并基于该框架类，重构了普通队列（MemoryQueue，该对象合并了queue中的Queue、LifoQueue和PriorityQueue），同时考虑对分布式应用所需的网络队列（如各类MQ）提供框架层级的扩展开发支持。
+[queue_hivenet](07_queue_hivenet.md)框架基于Python原生的队列库（queue）的模式定义了队列处理的基本框架类（QueueFw），并基于该框架类，重构了普通队列（MemoryQueue，该对象合并了queue中的Queue、LifoQueue和PriorityQueue），同时考虑对分布式应用所需的网络队列（如各类MQ）提供框架层级的扩展开发支持。
 
 本队列框架支持的方法与Python原生队列的支持的方法完全一致，因此可以直接使用原生队列替代实现队列处理，例如支持多进程访问的multiprocessing.Queue。
 
@@ -85,8 +85,11 @@ PIPY安装：pip install HiveNetCore
 [stream](08_stream.md)模块主要定义了python流处理的框架（按流顺序逐个对象进行处理），并基于该框架实现了字符串流的处理类StringStream。
 
 
-#### xml
-[xml](09_xml_hivenet.md)模块主要实现了xml文件的简单处理处理，模块使用lxml.etree进行底层处理。
+#### xml_hivenet
+[xml_hivenet](09_xml_hivenet.md)模块主要实现了xml文件的简单处理，模块使用lxml.etree进行底层处理。
+
+#### yaml
+yaml模块主要实现了yaml文件的简单处理, 模块基于ruamel.yaml实现, 可简单进行配置的查找、设置和保存, 支持注释。
 
 ### 其他模块
 

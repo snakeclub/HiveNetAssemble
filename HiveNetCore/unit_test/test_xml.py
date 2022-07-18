@@ -35,7 +35,7 @@ if not os.path.exists(_TEMP_DIR):
 
 class TestSimpleXml(unittest.TestCase):
     """
-    测试simple_id模块
+    测试xml_hivenet模块
     """
 
     def setUp(self):

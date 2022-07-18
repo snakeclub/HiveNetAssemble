@@ -1,0 +1,10 @@
+# 扩充的yaml配置
+# 扩充的yaml配置第二行
+extend_dict:
+  test: test_val # 测试字典信息
+  # 测试中间的注释
+  # 测试中间的注释第二行
+  test_list:
+    - 1
+    - 2
+    - 3

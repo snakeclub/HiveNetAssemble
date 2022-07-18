@@ -13,8 +13,6 @@
 @module prompt_plus
 @file prompt_plus.py
 """
-
-from __future__ import unicode_literals
 import threading
 import traceback
 import copy
@@ -361,6 +359,93 @@ class MemoryStringStream(object):
         输出内容
         """
         return self._buff
+
+
+class SimpleCompleter(Completer):
+    """
+    简单的自动完成提示类
+    """
+
+    def __init__(self, words, ignore_case: bool = False, slow_time: float = 0,
+            select_mode: bool = False, sentence: bool = False, words_fun_arg=None):
+        """
+        简单的自动完成提示类
+
+        @param {list|function} words - 要提示的单词列表或产生单词列表的执行函数对象
+            如果是函数, 函数定义为 func(当前词, 完整输入, words_fun_arg) -> 提示词列表
+        @param {bool} ignore_case=False - 匹配命令是否忽略大小写
+        @param {float} slow_time=0 - 延迟提示的时长(秒), 0代表不延迟
+        @param {bool} select_mode=False - 是否选择模式, 如果是则不根据输入内容过滤选项
+        @param {bool} sentence=False - 是否句子, 如果是则将整个输入视为一个词进行匹配
+        @param {Any} words_fun_arg=None - 当words参数为函数时, 传入该函数的额外参数
+        """
+        # 初始化可变参数
+        self.loading = False
+        self._words = words
+        self._ignore_case = ignore_case
+        self._slow_time = slow_time
+        self._select_mode = select_mode
+        self._sentence = sentence
+        self._words_fun_arg = words_fun_arg
+
+    def get_completions(self, document, complete_event):
+        """
+        重载Completer的提示函数
+
+        @param {prompt_toolkit.document} document - 要处理的文档
+        @param {function} complete_event - 事件
+
+        """
+        self.loading = True
+        if self._sentence:
+            # 将完整输入视为一个词
+            _word_before_cursor = document.text
+        else:
+            _word_before_cursor = self._get_word_before_cursor(document=document)
+
+        # 获取词列表
+        if callable(self._words):
+            _words = self._words(_word_before_cursor, document.text, self._words_fun_arg)
+        else:
+            _words = self._words
+
+        if self._slow_time > 0:
+            RunTool.sleep(self._slow_time)  # Simulate slowness.
+
+        if self._ignore_case:
+            _word_before_cursor = _word_before_cursor.lower()
+
+        for _word in _words:
+            if self._ignore_case:
+                _word = _word.lower()
+
+            if self._select_mode or _word.startswith(_word_before_cursor):
+                yield Completion(_word, -len(_word_before_cursor))
+
+        self.loading = False
+
+    #############################
+    # 内部函数
+    #############################
+    def _get_word_before_cursor(self, document):
+        """
+        获取当前位置的词, 解决document.get_word_before_cursor不支持-=等字符作为一个词判断的问题
+
+        @param {prompt_toolkit.document} document - 要处理的文档
+
+        @returns {string} - 找到当前位置前的词
+
+        """
+        _word_before_cursor = document.get_word_before_cursor()
+        # 检查当前词的前一个字符是否空格或文本开头, 如果不是, 则需要向前查找
+        _x, _y = document.cursor_position_row, document.cursor_position_col - \
+            len(_word_before_cursor)
+        _line = document.lines[_x]
+        while _y > 0 and _line[_y - 1:_y] != ' ':
+            _word_before_cursor = _line[_y - 1:_y] + _word_before_cursor
+            _y -= 1
+
+        return _word_before_cursor
 
 
 class PromptPlusCmdParaLexer(Lexer):
@@ -940,13 +1025,13 @@ class PromptPlusCompleter(Completer):
 
         @param {prompt_toolkit.document} document - 要获取的文档
 
-        @returns {list} - 获取到的填充词列表
+        @returns {(list, bool)} - 获取到的填充词列表和是否在双引号中的标记
 
         """
         _cmd = ''
         _current_word = document.get_word_before_cursor()
         if document.cursor_position_row == 0 and document.cursor_position_col == len(_current_word):
-            return self._cmd_word
+            return self._cmd_word, False
 
         # 非开头的输入, 先判断是否能找到命令参数
         _split_index = document.lines[0].find(' ')
@@ -955,15 +1040,15 @@ class PromptPlusCompleter(Completer):
                 match_str=document.lines[0][0:_split_index], match_type='cmd')
         if _cmd == '':
             # 匹配不到命令行参数, 返回空词
-            return []
+            return [], False
 
         # 判断是否在双引号中
         if self._check_position_in_string(document=document):
             # 在引号中, 不进行自动提示
-            return []
+            return [], True
 
         # 其他情况, 全量匹配即可
-        return self._para_word[_cmd]
+        return self._para_word[_cmd], False
 
     def _get_word_before_cursor(self, document):
         """
@@ -985,17 +1070,52 @@ class PromptPlusCompleter(Completer):
 
         return _word_before_cursor
 
+    def _get_path_complete_words(self, word_before_cursor: str) -> tuple:
+        """
+        获取路径提示词列表
+
+        @param {str} word_before_cursor - 光标前的词
+
+        @returns {(list, str)} - 返回提示词列表, 以及在游标前的词数组
+        """
+        _current_word = word_before_cursor
+        if _current_word == '':
+            return [], ''
+
+        if _current_word[-1] in ('/', '\\'):
+            # 是以路径标识结尾
+            if not os.path.exists(_current_word):
+                return [], ''
+            else:
+                # 路径存在
+                return os.listdir(_current_word), ''
+        else:
+            # 非路径标识结尾, 怀疑是部分文件
+            _path, _filename = os.path.split(_current_word)
+            if not os.path.exists(_path):
+                return [], ''
+
+            # 尝试找匹配的子目录或子文件
+            _file_names = os.listdir(_path)
+            _words = []
+            for _fn in _file_names:
+                if _fn.startswith(_filename):
+                    _words.append(_fn)
+
+            return _words, _filename
+
     #############################
     # 公共函数
     #############################
 
-    def __init__(self, cmd_para=None, ignore_case=False, slow_time=0):
+    def __init__(self, cmd_para=None, ignore_case=False, slow_time=0, enable_path_suggest: bool = True):
         """
         PromptPlusCompleter的构造函数, 传入命令行参数
 
         @param {cmdpara} cmd_para=None - 命令参数字典
         @param {bool} ignore_case=False - 匹配命令是否忽略大小写
         @param {int} slow_time=0 - 延迟提示的时长(秒), 0代表不延迟
+        @param {bool} enable_path_suggest=True - 是否启动路径选择建议
 
         """
         # 初始化可变参数
@@ -1006,6 +1126,8 @@ class PromptPlusCompleter(Completer):
         self._cmd_para = cmd_para
         self._ignore_case = ignore_case
         self._slow_time = slow_time
+        self._enable_path_suggest = enable_path_suggest
+
         # 应在__init__中初始化, 否则会出现两个实例对象引用地址一样的问题
         self._cmd_word = list()
         self._para_word = dict()
@@ -1051,20 +1173,27 @@ class PromptPlusCompleter(Completer):
         self.loading = True
         word_before_cursor = self._get_word_before_cursor(document=document)
 
-        _word_list = self._get_complete_words(document=document)
+        _word_list, _in_string = self._get_complete_words(document=document)
 
         if self._slow_time > 0:
             RunTool.sleep(self._slow_time)  # Simulate slowness.
 
-        if self._ignore_case:
-            word_before_cursor = word_before_cursor.lower()
-
-        for word in _word_list:
+        if _in_string or len(_word_list) > 0:
+            # 命令提示处理方式
             if self._ignore_case:
-                word = word.lower()
+                word_before_cursor = word_before_cursor.lower()
 
-            if word.startswith(word_before_cursor):
-                yield Completion(word, -len(word_before_cursor))
+            for word in _word_list:
+                if self._ignore_case:
+                    word = word.lower()
+
+                if word.startswith(word_before_cursor):
+                    yield Completion(word, -len(word_before_cursor))
+        else:
+            # 尝试获取路径和文件提示
+            _word_list, _path_word_before_cursor = self._get_path_complete_words(word_before_cursor)
+            for word in _word_list:
+                yield Completion(word, -len(_path_word_before_cursor))
 
         self.loading = False
 
@@ -1485,7 +1614,8 @@ class PromptPlus(object):
             _completer = PromptPlusCompleter(
                 cmd_para=self._prompt_init_para['cmd_para'],
                 ignore_case=self._prompt_init_para['ignore_case'],
-                slow_time=self._prompt_init_para['cmd_auto_complete_slow_time']
+                slow_time=self._prompt_init_para['cmd_auto_complete_slow_time'],
+                enable_path_suggest=self._prompt_init_para['enable_cmd_path_auto_complete']
             )
             self._prompt_init_para['completer'] = _completer
             self._prompt_init_para['complete_in_thread'] = True
@@ -1816,7 +1946,7 @@ class PromptPlus(object):
                         不启用则可以自行传入completer、complete_in_thread等原生参数
                     2、可以与complete_while_typing参数共同生效, 控制是按tab提示还是输入自动提示
                 cmd_auto_complete_slow_time {float} - 默认0, 输入后延迟多久提示完成菜单
-
+                enable_cmd_path_auto_complete {bool} - 默认True, 是否启动路径输入的自动提示
         """
         # 内部变量
         self._prompt_default_para = {
@@ -1830,7 +1960,8 @@ class PromptPlus(object):
             'enable_color_set': True,
             'color_set': None,
             'enable_cmd_auto_complete': True,
-            'cmd_auto_complete_slow_time': 0
+            'cmd_auto_complete_slow_time': 0,
+            'enable_cmd_path_auto_complete': True
         }
         # Prompt类初始化支持的参数名清单, 内部使用
         self._prompt_para_name_list = (

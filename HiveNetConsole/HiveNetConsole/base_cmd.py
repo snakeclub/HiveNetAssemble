@@ -616,16 +616,18 @@ class CommonCmd(CmdBaseFW):
             _i18n_obj.lang = self._console_global_para['language']
 
         # 修改配置文件中的默认语言
+        _yaml = yaml.YAML()
+        _yaml.indent(mapping=2, sequence=4, offset=2)  # 配置输出格式
         with open(self._console_global_para['config_file'], 'r', encoding=self._console_global_para['config_encoding']) as _f:
             _config_str = _f.read()
-            _config_dict = yaml.safe_load(_config_str)
+            _config_dict = _yaml.load(_config_str)
 
         # 修改语言值
         _config_dict['console']['language'] = self._console_global_para['language']
 
         # 写回文件
         with open(self._console_global_para['config_file'], 'w', encoding=self._console_global_para['config_encoding']) as _f:
-            yaml.safe_dump(_config_dict, stream=_f, allow_unicode=True)
+            _yaml.dump(_config_dict, stream=_f)
 
         prompt_obj.prompt_print(_("Current language set to '$1'",
                                   self._console_global_para['language']))

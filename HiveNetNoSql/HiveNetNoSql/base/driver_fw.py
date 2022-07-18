@@ -494,6 +494,40 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
+    #############################
+    # 数据库及集合辅助索引
+    #############################
+    def init_index_extend_dbs(self, dbs: dict):
+        """
+        在初始化索引参数中扩展数据库索引信息
+
+        @param {dict} dbs - 要扩展的数据库信息字典(注: 仅用于索引, 不创建实际数据库)
+                {
+                    '数据库名': {
+                        'args': [], # 创建数据库的args参数
+                        'kwargs': {}  #创建数据库的kwargs参数
+                    }
+                }
+        """
+        pass
+
+    def init_index_extend_collections(self, collections: dict):
+        """
+        在初始化索引参数中扩展集合索引信息
+
+        @param {dict} collections - 要扩展的集合信息字典(注: 仅用于索引, 不创建实际数据库)
+                {
+                    '数据库名': {
+                        '集合名': {
+                            'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
+                        }
+                        ...
+                    },
+                    ...
+                }
+        """
+        pass
+
 
 class NosqlAIOPoolDriver(NosqlDriverFW):
     """
@@ -630,6 +664,9 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
                 }
             logger {Logger} - 传入驱动的日志对象
         """
+        # 指定是否使用insert_many的单独生成语句, Fasle代表使用insert_one逐条插入替代(存在性能问题)
+        self._use_insert_many_generate_sqls = False
+
         # 公共参数处理
         self._driver_config = copy.deepcopy(driver_config)
         self._default_str_len = connect_config.get('default_str_len', 30)
@@ -1034,61 +1071,76 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         # 获取固定字段信息
         _fixed_col_define = await self._get_fixed_col_define(collection, session=session)
 
-        _msqls = []
-        _msql_paras = []
-        _mexecute_paras = {}
-        _mchecks = None
-        _mis_query = None
-        for _s_row in rows:
-            # 处理_id
-            _row = copy.copy(_s_row)  # 浅复制即可
-            if _row.get('_id', None) is None:
-                _row['_id'] = str(ObjectId())
-
+        if self._use_insert_many_generate_sqls:
+            # 生成插入多条数据的语句
+            # 获取执行sql
             _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
                 self._generate_sqls(
-                    'insert_one', collection, _row, fixed_col_define=_fixed_col_define
+                    'insert_many', collection, rows, fixed_col_define=_fixed_col_define
                 )
             )
-            # 语句检查参数
-            if _checks is not None:
-                if _mchecks is None:
-                    _mchecks = [None for _temp in _msqls]  # 生成检查列表
-                _mchecks.extend(_checks)
+            _execute_paras.update(_upd_execute_paras)
+            await self._execute_sqls(
+                _sqls, paras=_sql_paras, checks=_checks, conn=_conn, cursor=_cursor, **_execute_paras
+            )
+        else:
+            # 通过多次执行insert_one插入
+            _msqls = []
+            _msql_paras = []
+            _mexecute_paras = {}
+            _mchecks = None
+            _mis_query = None
+            for _s_row in rows:
+                # 处理_id
+                _row = copy.copy(_s_row)  # 浅复制即可
+                if _row.get('_id', None) is None:
+                    _row['_id'] = str(ObjectId())
 
-            # 是否查询参数
-            if _execute_paras.get('is_query', None) is not None:
-                _is_query = _execute_paras['is_query']
-                if type(_is_query) in (list, tuple):
-                    # 是列表的情况, 需要扩充
-                    if _mis_query is None:
-                        _mis_query = [False for _temp in _msqls]  # 生成查询列表
-                    _mis_query.extend(_is_query)
-                elif _is_query:
-                    # 最后一个要查询
-                    if _mis_query is not None:
-                        _mis_query.extend([False for _temp in _sqls[: -1]])
-                        _mis_query.append(True)
+                _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
+                    self._generate_sqls(
+                        'insert_one', collection, _row, fixed_col_define=_fixed_col_define
+                    )
+                )
+                # 语句检查参数
+                if _checks is not None:
+                    if _mchecks is None:
+                        _mchecks = [None for _temp in _msqls]  # 生成检查列表
+                    _mchecks.extend(_checks)
+
+                # 是否查询参数
+                if _execute_paras.get('is_query', None) is not None:
+                    _is_query = _execute_paras['is_query']
+                    if type(_is_query) in (list, tuple):
+                        # 是列表的情况, 需要扩充
+                        if _mis_query is None:
+                            _mis_query = [False for _temp in _msqls]  # 生成查询列表
+                        _mis_query.extend(_is_query)
+                    elif _is_query:
+                        # 最后一个要查询
+                        if _mis_query is not None:
+                            _mis_query.extend([False for _temp in _sqls[: -1]])
+                            _mis_query.append(True)
+                    else:
+                        # 最后一个非查询
+                        if _mis_query is not None:
+                            _mis_query.extend([False for _temp in _sqls])
                 else:
-                    # 最后一个非查询
+                    # 没有指定, 对于列表情况需要扩充
                     if _mis_query is not None:
                         _mis_query.extend([False for _temp in _sqls])
-            else:
-                # 没有指定, 对于列表情况需要扩充
-                if _mis_query is not None:
-                    _mis_query.extend([False for _temp in _sqls])
 
-            _msqls.extend(_sqls)
-            _msql_paras.extend(_sql_paras)
-            _mexecute_paras = _execute_paras
+                _msqls.extend(_sqls)
+                _msql_paras.extend(_sql_paras)
+                _mexecute_paras = _execute_paras
 
-        _mexecute_paras.update(_upd_execute_paras)
-        if _mis_query is not None:
-            _mexecute_paras['is_query'] = _mis_query
+            _mexecute_paras.update(_upd_execute_paras)
+            if _mis_query is not None:
+                _mexecute_paras['is_query'] = _mis_query
 
-        await self._execute_sqls(
-            _msqls, paras=_msql_paras, checks=_mchecks, conn=_conn, cursor=_cursor, **_mexecute_paras
-        )
+            await self._execute_sqls(
+                _msqls, paras=_msql_paras, checks=_mchecks, conn=_conn, cursor=_cursor, **_mexecute_paras
+            )
+
         return len(rows)
 
     async def update(self, collection: str, filter: dict, update: dict, multi: bool = True,
@@ -1611,6 +1663,51 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         )
 
     #############################
+    # 数据库及集合辅助索引
+    #############################
+    def init_index_extend_dbs(self, dbs: dict):
+        """
+        在初始化索引参数中扩展数据库索引信息
+
+        @param {dict} dbs - 要扩展的数据库信息字典(注: 仅用于索引, 不创建实际数据库)
+                {
+                    '数据库名': {
+                        'args': [], # 创建数据库的args参数
+                        'kwargs': {}  #创建数据库的kwargs参数
+                    }
+                }
+        """
+        pass
+
+    def init_index_extend_collections(self, collections: dict):
+        """
+        在初始化索引参数中扩展集合索引信息
+
+        @param {dict} collections - 要扩展的集合信息字典(注: 仅用于索引, 不创建实际数据库)
+                {
+                    '数据库名': {
+                        '集合名': {
+                            'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
+                        }
+                        ...
+                    },
+                    ...
+                }
+        """
+        # 遍历数据库处理字段信息字典
+        for _db_name, _collections in collections.items():
+            # 构建数据表的字段信息字典缓存
+            if _db_name not in self._fixed_col_define.keys():
+                self._fixed_col_define[_db_name] = {}
+
+            # 遍历表进行创建处理
+            for _collection, _info in _collections.items():
+                self._fixed_col_define[_db_name][_collection] = {
+                    'cols': list(_info.get('fixed_col_define', {}).keys()),
+                    'define': _info.get('fixed_col_define', {})
+                }
+
+    #############################
     # 内部函数
     #############################
     async def _get_fixed_col_define(self, collection: str, session: Any = None) -> dict:
@@ -2029,11 +2126,12 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
                 # 切换到指定数据库
                 await self.switch_db(_db_name)
 
+            # 构建数据表的字段信息字典缓存
+            if _db_name not in self._fixed_col_define.keys():
+                self._fixed_col_define[_db_name] = {}
+
             # 遍历表进行创建处理
             for _collection, _info in _collections.items():
-                # 构建数据表的字段信息字典缓存
-                if _db_name not in self._fixed_col_define.keys():
-                    self._fixed_col_define[_db_name] = {}
                 self._fixed_col_define[_db_name][_collection] = {
                     'cols': list(_info.get('fixed_col_define', {}).keys()),
                     'define': _info.get('fixed_col_define', {})

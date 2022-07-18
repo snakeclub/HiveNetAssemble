@@ -16,6 +16,7 @@ import os
 import sys
 import copy
 import json
+from bson.objectid import ObjectId
 from typing import Any, Union
 from HiveNetCore.utils.run_tool import AsyncTools
 from HiveNetCore.connection_pool import PoolConnectionFW
@@ -148,6 +149,9 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             connect_config=connect_config, pool_config=pool_config, driver_config=driver_config
         )
 
+        # 指定使用独立的insert_many语句, 性能更高
+        self._use_insert_many_generate_sqls = True
+
     #############################
     # 需要继承类实现的内部函数
     #############################
@@ -232,6 +236,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             'drop_collection': self._sql_fun_drop_collection,
             'turncate_collection': self._sql_fun_turncate_collection,
             'insert_one': self._sql_fun_insert_one,
+            'insert_many': self._sql_fun_insert_many,
             'update': self._sql_fun_update,
             'delete': self._sql_fun_delete,
             'query': self._sql_fun_query,
@@ -500,7 +505,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _is_json = False
         _cast_by_val = False  # 是否需要根据比较值判断类型
         if fixed_col_define is not None:
-            _fixed_cols = fixed_col_define.get('cols', [])
+            _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
             if key != '_id' and key not in _fixed_cols:
                 _is_json = True
                 _col_type = fixed_col_define.get('define', {}).get(_key, {}).get('type', None)
@@ -762,7 +767,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             # 全部认为是固定字段
             return ','.join(_projection)
 
-        _fixed_cols = fixed_col_define.get('cols', [])
+        _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
         _fixed_cols.append('_id')
         _real_cols = []
         for _col in _projection:
@@ -805,7 +810,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             # 全部认为是固定字段
             _sorts = ['%s %s' % (_item[0], 'asc' if _item[1] == 1 else 'desc') for _item in sort]
         else:
-            _fixed_cols = fixed_col_define.get('cols', [])
+            _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
             _fixed_cols.append('_id')
             _sorts = []
             for _item in sort:
@@ -842,7 +847,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         if fixed_col_define is None:
             _fixed_cols = []
         else:
-            _fixed_cols = fixed_col_define.get('cols', [])
+            _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
             _fixed_cols.append('_id')
 
         # 函数操作名映射
@@ -1084,6 +1089,57 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         )
 
         return ([_sql], [_sql_paras], {})
+
+    def _sql_fun_insert_many(self, op: str, *args, **kwargs) -> tuple:
+        """
+        生成插入数据的sql语句数组
+        """
+        _collection = args[0]
+        _rows = args[1]
+        _fixed_col_define = args[2] if len(args) > 2 else kwargs.get('fixed_col_define', {})
+
+        # 生成插入字段列表
+        _cols = ['_id']
+        for _col in _fixed_col_define.get('cols', []):
+            if _col == '_id':
+                continue
+
+            _cols.append('%s' % _col)
+
+        _cols.append('nosql_driver_extend_tags')
+
+        # 遍历生成插入数据和参数
+        _para_array = []
+        _value_array = []
+        for _s_row in _rows:
+            _row = copy.copy(_s_row)  # 浅复制即可
+            _sql_paras = [_row.pop('_id', str(ObjectId()))]
+            _col_values = ['%s']
+            for _col in _fixed_col_define.get('cols', []):
+                if _col == '_id':
+                    continue
+
+                _val = _row.pop(_col, None)
+                if _val is None:
+                    _col_values.append('null')
+                else:
+                    _col_values.append('%s')
+                    _sql_paras.append(self._python_to_dbtype(_val)[1])
+
+            # 剩余的内容放入扩展字段
+            _col_values.append('%s')
+            _sql_paras.append(self._python_to_dbtype(_row)[1])
+
+            # 添加到数组
+            _para_array.extend(_sql_paras)
+            _value_array.append('(%s)' % ','.join(_col_values))
+
+        # 组成sql
+        _sql = 'insert into %s.%s(%s) values %s' % (
+            self._db_name, _collection, ','.join(_cols), ','.join(_value_array)
+        )
+
+        return ([_sql], [_para_array], {})
 
     def _sql_fun_update(self, op: str, *args, **kwargs) -> tuple:
         """

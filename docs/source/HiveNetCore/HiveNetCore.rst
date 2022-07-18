@@ -27,6 +27,7 @@ Submodules
    HiveNetCore.redirect_stdout
    HiveNetCore.stream
    HiveNetCore.xml_hivenet
+   HiveNetCore.yaml
 
 Module contents
 ---------------

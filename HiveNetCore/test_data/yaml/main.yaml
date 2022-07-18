@@ -1,0 +1,39 @@
+# yaml主体配置
+config1:
+  # 主体配置第一个配置项
+  # 主体配置第一个配置项的第二行注释
+  example_dict:
+    # example_dict的注释
+    int_val: 11
+    float_val: 10.1
+    bool_val: true
+    str_val: my_str
+    str_zh: 中文内容
+    list_val:
+      - value_1
+      - value_2
+      - 3
+      # list中嵌套字典
+      -
+        list_key1: list_key1_val
+        list_key2: list_key2_val
+      # list中嵌套list
+      -
+        - list2_val1
+        - list2_val2
+    dict:
+      dict_key1: dict_key1_val
+      dict_key2: dict_key2_val
+  # 第一个配置项的第2个配置项
+  example_2:
+    list2_val:
+      - list2_value_1
+      - list2_value_2
+    dict2: dist2_val
+
+config2:
+  # 主体配置第二个配置项
+  example_3: example_3_value
+
+config3:
+  # 主体配置第三个配置项

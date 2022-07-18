@@ -31,7 +31,8 @@ DEPENDENCIES = [
     'lxml',
     'elementpath',
     'nest_asyncio',
-    'requests'
+    'requests',
+    'ruamel.yaml'
 ]
 
 if sys.platform == 'win32':
