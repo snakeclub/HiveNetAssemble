@@ -19,6 +19,7 @@ import copy
 import traceback
 from bson.objectid import ObjectId
 from typing import Union, Any
+from HiveNetCore.yaml import SimpleYaml, EnumYamlObjType
 from HiveNetCore.utils.run_tool import AsyncTools
 from HiveNetCore.utils.test_tool import TestTool
 from HiveNetCore.connection_pool import AIOConnectionPool
@@ -60,21 +61,27 @@ class NosqlDriverFW(object):
                 {
                     '数据库名': {
                         'index_only': False,  # 是否仅用于索引, 不创建
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
-                    }
+                    },
+                    ...
                 }
             init_collections {dict} - 要在启动驱动时创建的集合(表)
                 {
                     '数据库名': {
                         '集合名': {
                             'index_only': False,  # 是否仅用于索引, 不创建
+                            'comment': '',  # 集合注释
                             'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
-                        }
+                        },
                         ...
                     },
                     ...
                 }
+            init_yaml_file {str} - 要在启动时创建的数据库和集合(表)配置yaml文件
+                注1: 该参数用于将init_db和init_collections参数内容放置的配置文件中, 如果参数有值则忽略前面两个参数
+                注2: 配置文件为init_db和init_collections两个字典, 内容与这两个参数一致
             logger {Logger} - 传入驱动的日志对象
         """
         raise NotImplementedError()
@@ -117,7 +124,7 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def switch_db(self, name: str):
+    async def switch_db(self, name: str, *args, **kwargs):
         """
         切换当前数据库到指定数据库
 
@@ -125,7 +132,7 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def list_dbs(self) -> list:
+    async def list_dbs(self, *args, **kwargs) -> list:
         """
         列出数据库清单
 
@@ -133,7 +140,7 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def drop_db(self, name: str):
+    async def drop_db(self, name: str, *args, **kwargs):
         """
         删除数据库
 
@@ -144,7 +151,8 @@ class NosqlDriverFW(object):
     #############################
     # 集合操作
     #############################
-    async def create_collection(self, collection: str, indexs: dict = None, fixed_col_define: dict = None):
+    async def create_collection(self, collection: str, indexs: dict = None, fixed_col_define: dict = None,
+            comment: str = None, **kwargs):
         """
         创建集合(相当于关系型数据库的表, 如果不存在则创建)
         注意: 所有集合都有必须有 '_id' 这个记录的唯一主键字段
@@ -169,14 +177,19 @@ class NosqlDriverFW(object):
             {
                 '字段名': {
                     'type': '字段类型(str, int, float, bool, json)',
-                    'len': 字段长度
+                    'len': 字段长度,
+                    'nullable': True,  # 是否可空
+                    'default': 默认值,
+                    'comment': '字段注释'
                 },
                 ...
             }
+        @param {str} comment=None - 集合注释
+        @param {kwargs} - 实现驱动自定义支持的参数
         """
         raise NotImplementedError()
 
-    async def list_collections(self, filter: dict = None) -> list:
+    async def list_collections(self, filter: dict = None, **kwargs) -> list:
         r"""
         获取所有集合(表)清单
 
@@ -187,7 +200,7 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def drop_collection(self, collection: str):
+    async def drop_collection(self, collection: str, *args, **kwargs):
         """
         删除集合
         注: 集合不存在也正常返回
@@ -196,7 +209,7 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def turncate_collection(self, collection: str):
+    async def turncate_collection(self, collection: str, *args, **kwargs):
         """
         清空集合记录
 
@@ -204,7 +217,7 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def collections_exists(self, collection: str) -> bool:
+    async def collections_exists(self, collection: str, *args, **kwargs) -> bool:
         """
         判断集合(表)是否存在
 
@@ -217,7 +230,7 @@ class NosqlDriverFW(object):
     #############################
     # 事务支持
     #############################
-    async def start_transaction(self) -> Any:
+    async def start_transaction(self, *args, **kwargs) -> Any:
         """
         启动事务
         注: 通过该方法处理事务, 必须显式通过commit_transaction或abort_transaction关闭事务
@@ -226,7 +239,7 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def commit_transaction(self, session):
+    async def commit_transaction(self, session, *args, **kwargs):
         """
         提交事务
 
@@ -234,7 +247,7 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def abort_transaction(self, session):
+    async def abort_transaction(self, session, *args, **kwargs):
         """
         回滚事务
 
@@ -245,7 +258,7 @@ class NosqlDriverFW(object):
     #############################
     # 数据操作
     #############################
-    async def insert_one(self, collection: str, row: dict, session: Any = None) -> str:
+    async def insert_one(self, collection: str, row: dict, session: Any = None, **kwargs) -> str:
         """
         插入一条记录
 
@@ -258,7 +271,7 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def insert_many(self, collection: str, rows: list, session: Any = None) -> int:
+    async def insert_many(self, collection: str, rows: list, session: Any = None, **kwargs) -> int:
         """
         插入多条记录
 
@@ -272,7 +285,7 @@ class NosqlDriverFW(object):
         raise NotImplementedError()
 
     async def update(self, collection: str, filter: dict, update: dict, multi: bool = True,
-             upsert: bool = False, hint: dict = None, session: Any = None) -> int:
+             upsert: bool = False, hint: dict = None, session: Any = None, **kwargs) -> int:
         """
         更新找到的记录
 
@@ -296,7 +309,7 @@ class NosqlDriverFW(object):
         raise NotImplementedError()
 
     async def delete(self, collection: str, filter: dict, multi: bool = True, hint: dict = None,
-            session: Any = None) -> int:
+            session: Any = None, **kwargs) -> int:
         """
         删除指定记录
 
@@ -314,7 +327,7 @@ class NosqlDriverFW(object):
     # 数据查询
     #############################
     async def query_list(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
-            sort: list = None, skip: int = None, limit: int = None, hint: dict = None, session: Any = None) -> list:
+            sort: list = None, skip: int = None, limit: int = None, hint: dict = None, session: Any = None, **kwargs) -> list:
         """
         查询记录(直接返回清单)
 
@@ -345,7 +358,7 @@ class NosqlDriverFW(object):
 
     async def query_iter(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
             sort: list = None, skip: int = None, limit: int = None, hint: dict = None, fetch_each: int = 1,
-            session: Any = None):
+            session: Any = None, **kwargs):
         """
         查询记录(通过迭代对象依次返回)
 
@@ -376,7 +389,7 @@ class NosqlDriverFW(object):
 
     async def query_count(self, collection: str, filter: dict = None,
             skip: int = None, limit: int = None, hint: dict = None, overtime: float = None,
-            session: Any = None) -> int:
+            session: Any = None, **kwargs) -> int:
         """
         获取匹配查询条件的结果数量
 
@@ -394,7 +407,7 @@ class NosqlDriverFW(object):
 
     async def query_group_by(self, collection: str, group: dict = None, filter: dict = None,
             projection: Union[dict, list] = None, sort: list = None,
-            overtime: float = None, session: Any = None) -> list:
+            overtime: float = None, session: Any = None, **kwargs) -> list:
         """
         获取记录聚合统计的结果
 
@@ -413,7 +426,8 @@ class NosqlDriverFW(object):
         """
         raise NotImplementedError()
 
-    async def query_page_info(self, collection: str, page_size: int = 15, filter: dict = None, hint: dict = None, session: Any = None) -> dict:
+    async def query_page_info(self, collection: str, page_size: int = 15, filter: dict = None,
+            hint: dict = None, session: Any = None, **kwargs) -> dict:
         """
         查询分页信息字典
 
@@ -452,7 +466,7 @@ class NosqlDriverFW(object):
 
     async def query_page(self, collection: str, page_index: int = 1, page_size: int = 15, filter: dict = None,
             projection: Union[dict, list] = None,
-            sort: list = None, hint: dict = None, session: Any = None) -> list:
+            sort: list = None, hint: dict = None, session: Any = None, **kwargs) -> list:
         """
         查询分页记录(直接返回清单)
 
@@ -504,6 +518,7 @@ class NosqlDriverFW(object):
         @param {dict} dbs - 要扩展的数据库信息字典(注: 仅用于索引, 不创建实际数据库)
                 {
                     '数据库名': {
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -519,6 +534,7 @@ class NosqlDriverFW(object):
                 {
                     '数据库名': {
                         '集合名': {
+                            'comment': '',  # 集合注释
                             'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
                         }
                         ...
@@ -647,6 +663,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
                 {
                     '数据库名': {
                         'index_only': False,  # 是否仅用于索引, 不创建
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -656,13 +673,19 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
                     '数据库名': {
                         '集合名': {
                             'index_only': False,  # 是否仅用于索引, 不创建
+                            'comment': '',  # 集合注释
                             'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
                         }
                         ...
                     },
                     ...
                 }
+            init_yaml_file {str} - 要在启动时创建的数据库和集合(表)配置yaml文件
+                注1: 该参数用于将init_db和init_collections参数内容放置的配置文件中, 如果参数有值则忽略前面两个参数
+                注2: 配置文件为init_db和init_collections两个字典, 内容与这两个参数一致
             logger {Logger} - 传入驱动的日志对象
+            ignore_index_error {bool} - 是否忽略索引创建的异常, 默认为True
+            debug {bool} - 指定是否debug模式, 默认为False
         """
         # 指定是否使用insert_many的单独生成语句, Fasle代表使用insert_one逐条插入替代(存在性能问题)
         self._use_insert_many_generate_sqls = False
@@ -671,10 +694,14 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         self._driver_config = copy.deepcopy(driver_config)
         self._default_str_len = connect_config.get('default_str_len', 30)
         self._transaction_share_cursor = connect_config.get('transaction_share_cursor', True)
+        self._debug = self._driver_config.get('debug', False)
+        self._ignore_index_error = self._driver_config.get('ignore_index_error', True)
         self._logger = driver_config.get('logger', None)
         if self._logger is None:
             logging.basicConfig()
             self._logger = logging.getLogger(__name__)
+            if self._debug:
+                self._logger.setLevel(logging.DEBUG)
 
         # 获取数据库连接驱动及参数
         _creator_infos = self._get_db_creator(connect_config, pool_config, driver_config)
@@ -706,8 +733,23 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             self._db_name = self.db_name
 
         # 启动后创建数据库
+        if self._driver_config.get('init_yaml_file', None) is None:
+            _init_db = self._driver_config.get('init_db', {})
+            _init_collections = self._driver_config.get('init_collections', {})
+        else:
+            _init_yaml = SimpleYaml(
+                self._driver_config['init_yaml_file'], obj_type=EnumYamlObjType.File,
+                encoding='utf-8'
+            )
+            _init_db = _init_yaml.get_value('init_db', default={})
+            if _init_db is None:
+                _init_db = {}
+            _init_collections = _init_yaml.get_value('init_collections', default={})
+            if _init_collections is None:
+                _init_collections = {}
+
         _temp_db_name = self._db_name
-        for _name, _db_info in self._driver_config.get('init_db', {}).items():
+        for _name, _db_info in _init_db.items():
             if _db_info.get('index_only', False):
                 # 只索引不创建
                 continue
@@ -727,10 +769,9 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         self._fixed_col_define = {}
 
         # 启动驱动时创建集合(表)
-        if driver_config.get('init_collections', None) is not None:
-            AsyncTools.sync_run_coroutine(
-                self._init_collections(driver_config['init_collections'])
-            )
+        AsyncTools.sync_run_coroutine(
+            self._init_collections(_init_collections)
+        )
 
     #############################
     # 主动销毁驱动
@@ -773,7 +814,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         )
         await self.switch_db(name)
 
-    async def switch_db(self, name: str):
+    async def switch_db(self, name: str, *args, **kwargs):
         """
         切换当前数据库到指定数据库
 
@@ -787,7 +828,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         )
         self._db_name = name
 
-    async def list_dbs(self) -> list:
+    async def list_dbs(self, *args, **kwargs) -> list:
         """
         列出数据库清单
 
@@ -802,7 +843,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         # 需要将字典形式的列表转换为数据库名列表, 注意查询结果的字段名必须为name
         return [_db['name'] for _db in _ret]
 
-    async def drop_db(self, name: str):
+    async def drop_db(self, name: str, *args, **kwargs):
         """
         删除数据库
 
@@ -824,7 +865,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
     #############################
     # 集合操作
     #############################
-    async def create_collection(self, collection: str, indexs: dict = None, fixed_col_define: dict = None):
+    async def create_collection(self, collection: str, indexs: dict = None, fixed_col_define: dict = None,
+            comment: str = None, **kwargs):
         """
         创建集合(相当于关系型数据库的表, 如果不存在则创建)
         注意: 所有集合都有必须有 '_id' 这个记录的唯一主键字段
@@ -849,21 +891,27 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             {
                 '字段名': {
                     'type': '字段类型(str, int, float, bool, json)',
-                    'len': 字段长度
+                    'len': 字段长度,
+                    'nullable': True,  # 是否可空
+                    'default': 默认值,
+                    'comment': '字段注释'
                 },
                 ...
             }
+        @param {str} comment=None - 集合注释
+        @param {kwargs} - 实现驱动自定义支持的参数
         """
         _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
-                'create_collection', collection, indexs=indexs, fixed_col_define=fixed_col_define
+                'create_collection', collection, indexs=indexs, fixed_col_define=fixed_col_define,
+                comment=comment, **kwargs
             )
         )
         return await self._execute_sqls(
             _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
 
-    async def list_collections(self, filter: dict = None) -> list:
+    async def list_collections(self, filter: dict = None, **kwargs) -> list:
         r"""
         获取所有集合(表)清单
 
@@ -881,7 +929,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         # 需要将字典形式的列表转换为数据库名列表, 注意查询结果的字段名必须为name
         return [_tab['name'] for _tab in _ret]
 
-    async def drop_collection(self, collection: str):
+    async def drop_collection(self, collection: str, *args, **kwargs):
         """
         删除集合
         注: 集合不存在也正常返回
@@ -899,7 +947,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
 
-    async def turncate_collection(self, collection: str):
+    async def turncate_collection(self, collection: str, *args, **kwargs):
         """
         清空集合记录
 
@@ -912,7 +960,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
         )
 
-    async def collections_exists(self, collection: str) -> bool:
+    async def collections_exists(self, collection: str, *args, **kwargs) -> bool:
         """
         判断集合(表)是否存在
 
@@ -926,7 +974,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
     #############################
     # 事务支持
     #############################
-    async def start_transaction(self) -> Any:
+    async def start_transaction(self, *args, **kwargs) -> Any:
         """
         启动事务
         注: 通过该方法处理事务, 必须显式通过commit_transaction或abort_transaction关闭事务
@@ -942,7 +990,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         return (_conn, _cursor)
 
-    async def commit_transaction(self, session):
+    async def commit_transaction(self, session, *args, **kwargs):
         """
         提交事务
 
@@ -960,7 +1008,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         # 关闭连接
         await AsyncTools.async_run_coroutine(_conn.close())
 
-    async def abort_transaction(self, session):
+    async def abort_transaction(self, session, *args, **kwargs):
         """
         回滚事务
 
@@ -981,7 +1029,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
     #############################
     # 数据操作
     #############################
-    async def insert_one(self, collection: str, row: dict, session: Any = None) -> str:
+    async def insert_one(self, collection: str, row: dict, session: Any = None, **kwargs) -> str:
         """
         插入一条记录
 
@@ -1036,7 +1084,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         if _ret == 1:
             return _id
 
-    async def insert_many(self, collection: str, rows: list, session: Any = None) -> int:
+    async def insert_many(self, collection: str, rows: list, session: Any = None, **kwargs) -> int:
         """
         插入多条记录
 
@@ -1144,7 +1192,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         return len(rows)
 
     async def update(self, collection: str, filter: dict, update: dict, multi: bool = True,
-             upsert: bool = False, hint: dict = None, session: Any = None) -> int:
+             upsert: bool = False, hint: dict = None, session: Any = None, **kwargs) -> int:
         """
         更新找到的记录
 
@@ -1163,6 +1211,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         @param {bool} upsert=False - 指定如果记录不存在是否插入
         @param {dict} hint=None - 指定查询使用索引的名字清单
         @param {Any} session=None - 指定事务连接对象
+        @param {list|str} partition=None - MySQL, PostgreSQL专有参数, 指定操作的分区
+            注: MySQL支持送入分区列表名, 例如(p1, s3); PostgreSQL仅支持送入单个分区后缀名, 例如'p1'
 
         @returns {int} - 返回更新的数据条数
         """
@@ -1210,7 +1260,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
                 self._generate_sqls(
                     'update', collection, _filter, update, multi=multi, upsert=upsert, hint=hint,
-                    fixed_col_define=_fixed_col_define
+                    fixed_col_define=_fixed_col_define, **kwargs
                 )
             )
             _execute_paras.update(_upd_execute_paras)
@@ -1244,7 +1294,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             return 0
 
     async def delete(self, collection: str, filter: dict, multi: bool = True, hint: dict = None,
-            session: Any = None) -> int:
+            session: Any = None, **kwargs) -> int:
         """
         删除指定记录
 
@@ -1253,6 +1303,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         @param {bool} multi=True - 是否删除全部找到的记录, 如果为Fasle只删除找到的第一条记录
         @param {dict} hint=None - 指定查询使用索引的名字清单
         @param {Any} session=None - 指定事务连接对象
+        @param {list|str} partition=None - MySQL, PostgreSQL专有参数, 指定操作的分区
+            注: MySQL支持送入分区列表名, 例如(p1, s3); PostgreSQL仅支持送入单个分区后缀名, 例如'p1'
 
         @returns {int} - 删除记录数量
         """
@@ -1298,7 +1350,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'delete', collection, _filter, multi=multi, hint=hint,
-                fixed_col_define=_fixed_col_define
+                fixed_col_define=_fixed_col_define, **kwargs
             )
         )
 
@@ -1311,7 +1363,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
     # 数据查询
     #############################
     async def query_list(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
-            sort: list = None, skip: int = None, limit: int = None, hint: dict = None, session: Any = None) -> list:
+            sort: list = None, skip: int = None, limit: int = None, hint: dict = None, session: Any = None, **kwargs) -> list:
         """
         查询记录(直接返回清单)
 
@@ -1335,6 +1387,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         @param {dict} hint=None - 指定查询使用索引的名字清单
             例: {'index_name1': 1, 'index_name2': 1}
         @param {Any} session=None - 指定事务连接对象
+        @param {list|str} partition=None - MySQL, PostgreSQL专有参数, 指定操作的分区
+            注: MySQL支持送入分区列表名, 例如(p1, s3); PostgreSQL仅支持送入单个分区后缀名, 例如'p1'
 
         @returns {list} - 返回的结果列表
         """
@@ -1367,7 +1421,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query', collection, filter=_filter, projection=projection, sort=sort,
-                skip=skip, limit=limit, hint=hint, fixed_col_define=_fixed_col_define
+                skip=skip, limit=limit, hint=hint, fixed_col_define=_fixed_col_define,
+                **kwargs
             )
         )
         # 更新执行sql的参数
@@ -1378,7 +1433,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
     async def query_iter(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
             sort: list = None, skip: int = None, limit: int = None, hint: dict = None, fetch_each: int = 1,
-            session: Any = None):
+            session: Any = None, **kwargs):
         """
         查询记录(通过迭代对象依次返回)
 
@@ -1402,6 +1457,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             例: {'index_name1': 1, 'index_name2': 1}
         @param {int} fetch_each=1 - 每次获取返回的记录数量
         @param {Any} session=None - 指定事务连接对象
+        @param {list|str} partition=None - MySQL, PostgreSQL专有参数, 指定操作的分区
+            注: MySQL支持送入分区列表名, 例如(p1, s3); PostgreSQL仅支持送入单个分区后缀名, 例如'p1'
 
         @returns {list} - 返回的结果列表迭代器
         """
@@ -1433,7 +1490,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query', collection, filter=_filter, projection=projection, sort=sort,
-                skip=skip, limit=limit, hint=hint, fixed_col_define=_fixed_col_define
+                skip=skip, limit=limit, hint=hint, fixed_col_define=_fixed_col_define,
+                **kwargs
             )
         )
         _execute_is_query = _execute_paras.get('is_query', True)
@@ -1518,7 +1576,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
     async def query_count(self, collection: str, filter: dict = None,
             skip: int = None, limit: int = None, hint: dict = None, overtime: float = None,
-            session: Any = None) -> int:
+            session: Any = None, **kwargs) -> int:
         """
         获取匹配查询条件的结果数量
 
@@ -1529,6 +1587,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         @param {dict} hint=None - 指定查询使用索引的名字清单
         @param {float} overtime=None - 指定操作的超时时间, 单位为秒
         @param {Any} session=None - 指定事务连接对象
+        @param {list|str} partition=None - MySQL, PostgreSQL专有参数, 指定操作的分区
+            注: MySQL支持送入分区列表名, 例如(p1, s3); PostgreSQL仅支持送入单个分区后缀名, 例如'p1'
 
         @returns {int} - 返回查询条件匹配的记录数
         """
@@ -1561,7 +1621,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query_count', collection, filter=_filter, skip=skip, limit=limit, hint=hint,
-                fixed_col_define=_fixed_col_define
+                fixed_col_define=_fixed_col_define, **kwargs
             )
         )
 
@@ -1576,7 +1636,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
     async def query_group_by(self, collection: str, group: dict = None, filter: dict = None,
             projection: Union[dict, list] = None, sort: list = None,
-            overtime: float = None, session: Any = None) -> list:
+            overtime: float = None, session: Any = None, **kwargs) -> list:
         """
         获取记录聚合统计的结果
 
@@ -1590,6 +1650,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         @param {list} sort=None - 查询结果的排序方式(注意排序字段为返回结果的分组字段, 而不是表的原始字段)
         @param {float} overtime=None - 指定操作的超时时间, 单位为秒
         @param {Any} session=None - 指定事务连接对象
+        @param {list|str} partition=None - MySQL, PostgreSQL专有参数, 指定操作的分区
+            注: MySQL支持送入分区列表名, 例如(p1, s3); PostgreSQL仅支持送入单个分区后缀名, 例如'p1'
 
         @returns {list} - 返回结果列表
         """
@@ -1622,7 +1684,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query_group_by', collection, group=group, filter=_filter, projection=projection,
-                sort=sort, fixed_col_define=_fixed_col_define
+                sort=sort, fixed_col_define=_fixed_col_define, **kwargs
             )
         )
 
@@ -1637,7 +1699,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
     async def run_native_cmd(self, sql: str, paras: tuple = None, is_query: bool = True,
             conn: Any = None, cursor: Any = None,
             commit_on_finished: bool = True, rollback_on_exception: bool = True,
-            close_cursor: bool = False, close_conn: bool = False):
+            close_cursor: bool = False, close_conn: bool = False, **kwargs):
         """
         执行原生命令(或SQL)并返回执行结果
         注: 该函数不支持驱动的兼容处理
@@ -1672,6 +1734,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         @param {dict} dbs - 要扩展的数据库信息字典(注: 仅用于索引, 不创建实际数据库)
                 {
                     '数据库名': {
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -1687,7 +1750,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
                 {
                     '数据库名': {
                         '集合名': {
-                            'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
+                            'comment': '',  # 集合注释
+                            'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}, ...
                         }
                         ...
                     },
@@ -1991,6 +2055,10 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             _ret = None
 
             # 执行sql
+            if self._debug:
+                # debug模式, 打印sql
+                self._logger.debug('run sql: %s, para: %s' % (sql, paras))
+
             if paras is None:
                 await AsyncTools.async_run_coroutine(_cursor.execute(sql))
             else:
@@ -2071,6 +2139,10 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         try:
             # 执行sql
+            if self._debug:
+                # debug模式, 打印sql
+                self._logger.debug('run sql: %s, para: %s' % (sql, paras))
+
             if paras is None:
                 await AsyncTools.async_run_coroutine(_cursor.execute(sql))
             else:
@@ -2147,8 +2219,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
                 # 建表操作
                 await self.create_collection(
-                    _collection, indexs=_info.get('indexs', None),
-                    fixed_col_define=_info.get('fixed_col_define', None)
+                    _collection, **_info
                 )
 
         # 切换回开始的数据库

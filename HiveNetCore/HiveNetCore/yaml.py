@@ -20,6 +20,7 @@ from ruamel.yaml.compat import StringIO
 from ruamel.yaml.comments import CommentedSeq
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
+from HiveNetCore.utils.file_tool import FileTool
 
 
 __MOUDLE__ = 'yaml'  # 模块名
@@ -44,6 +45,42 @@ class SimpleYaml(object):
     """
     Yaml配置文件的处理
     """
+
+    #############################
+    # 静态函数
+    #############################
+    @classmethod
+    def yaml_to_dict(cls, yaml_str: str, support_comments: bool = False) -> dict:
+        """
+        将yaml字符串转换为字典格式
+
+        @param {str} yaml_str - yaml字符串
+        @param {bool} support_comments=False - 是否支持注释
+            注: 如果支持注释, 返回的对象为兼容dict方法的CommentedMap对象
+
+        @returns {dict} - 返回字典对象
+        """
+        _yaml = ruamel.yaml.YAML()
+        _yaml_config = _yaml.load(yaml_str)
+        if support_comments:
+            return _yaml_config
+        else:
+            return dict(_yaml_config)
+
+    @classmethod
+    def dict_to_yaml(cls, data: dict) -> str:
+        """
+        将字典转换为yaml字符串
+
+        @param {dict|CommentedMap} data - 要处理的字典
+
+        @returns {str} - 返回转换后的yaml字符串
+        """
+        _yaml = ruamel.yaml.YAML()
+        _yaml.indent(mapping=2, sequence=4, offset=2)  # 配置输出格式
+        _stream = StringIO()
+        _yaml.dump(data, stream=_stream)
+        return _stream.getvalue()
 
     #############################
     # 构造函数
@@ -112,7 +149,7 @@ class SimpleYaml(object):
 
         @property {CommentedMap}
         """
-        return dict(self._yaml_config)
+        return self._yaml_config
 
     @property
     def yaml_dict(self):
@@ -121,7 +158,7 @@ class SimpleYaml(object):
 
         @property {dict}
         """
-        return self._yaml_config
+        return dict(self._yaml_config)
 
     #############################
     # 公共函数
@@ -172,6 +209,12 @@ class SimpleYaml(object):
         """
         _file = self.file if file is None else file
         _encoding = self.encoding if encoding is None else encoding
+
+        # 如果目录不存在则进行创建
+        _path, _temp_file = os.path.split(_file)
+        if not os.path.exists(_path):
+            FileTool.create_dir(_path, exist_ok=True)
+
         with open(_file, 'w', encoding=_encoding) as _f:
             _f.write(self.yaml_str)
 
@@ -189,6 +232,9 @@ class SimpleYaml(object):
             注: 如果有指定索引值搜素则创建为list, 否则创建为dict
         """
         _last_obj = self._yaml_config
+        if _last_obj is None:
+            _last_obj = {}
+
         _paths = path.split('/')
         _path_max_index = len(_paths) - 1  # 最后一个路径索引
         for _index in range(_path_max_index + 1):

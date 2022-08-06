@@ -47,6 +47,13 @@ class DriverTestCaseFW(object):
         """
         销毁连接
         """
+        # 删除测试的库
+        for _db_name in ['memory', 'db_init_test', 'db_test1', 'db_test2', 'db_del_test1', 'db_del_test2']:
+            try:
+                # AsyncTools.sync_run_coroutine(self.driver.drop_db(_db_name))
+                pass
+            except:
+                pass
         AsyncTools.sync_run_coroutine(self.driver.destroy())
 
     #############################
@@ -59,10 +66,12 @@ class DriverTestCaseFW(object):
         """
         return {
             'memory': {
-                'index_only': False
+                'index_only': False,
+                'comment': '内存数据库'
             },
             'db_init_test': {
-                'index_only': False
+                'index_only': False,
+                'comment': '初始化测试库'
             }
         }
 
@@ -122,7 +131,8 @@ class DriverTestCaseFW(object):
             'test_query_aggregate_4',
             'test_page_1',
             'test_data_type_1',
-            'test_special_char2'
+            'test_special_char2',
+            'test_null_data_3'
         ]
 
     @property
@@ -135,6 +145,7 @@ class DriverTestCaseFW(object):
             'memory': {
                 'tb_init_on_memory': {
                     'index_only': False,
+                    'comment': '初始化在内存库的表"\',\\"',
                     'indexs': {
                         'idx_tb_init_on_memory_c_index_c_int': {
                             'keys': {
@@ -146,12 +157,12 @@ class DriverTestCaseFW(object):
                         }
                     },
                     'fixed_col_define': {
-                        'c_index': {'type': 'str', 'len': 20},
-                        'c_str': {'type': 'str', 'len': 50},
-                        'c_bool': {'type': 'bool'},
-                        'c_int': {'type': 'int'},
-                        'c_float': {'type': 'float'},
-                        'c_json': {'type': 'json'}
+                        'c_index': {'type': 'str', 'len': 20, 'comment': '索引, 字符类型字段, 特殊字符"\',\\"', 'nullable': True},
+                        'c_str': {'type': 'str', 'len': 50, 'comment': '字符类型字段', 'nullable': False, 'default': '"\''},
+                        'c_bool': {'type': 'bool', 'comment': '布尔类型字段', 'nullable': False, 'default': True},
+                        'c_int': {'type': 'int', 'comment': 'int类型字段', 'nullable': False, 'default': 10},
+                        'c_float': {'type': 'float', 'comment': 'float类型字段'},
+                        'c_json': {'type': 'json', 'comment': 'json类型字段', 'nullable': False, 'default': {"a": "b"}}
                     }
                 }
             },
@@ -159,14 +170,15 @@ class DriverTestCaseFW(object):
             'db_init_test': {
                 'tb_init_on_db_init_test': {
                     'index_only': False,
+                    'comment': '初始化在测试库的表',
                     'indexs': None,
                     'fixed_col_define': {
-                        'c_index': {'type': 'str', 'len': 20},
-                        'c_str': {'type': 'str', 'len': 50},
-                        'c_bool': {'type': 'bool'},
-                        'c_int': {'type': 'int'},
-                        'c_float': {'type': 'float'},
-                        'c_json': {'type': 'json'}
+                        'c_index': {'type': 'str', 'len': 20, 'comment': '索引, 字符类型字段'},
+                        'c_str': {'type': 'str', 'len': 50, 'comment': '字符类型字段'},
+                        'c_bool': {'type': 'bool', 'comment': '布尔类型字段'},
+                        'c_int': {'type': 'int', 'comment': 'int类型字段'},
+                        'c_float': {'type': 'float', 'comment': 'float类型字段'},
+                        'c_json': {'type': 'json', 'comment': 'json类型字段'}
                     }
                 }
             }
@@ -257,11 +269,17 @@ class DriverTestCaseFW(object):
         for _db in _test_dbs:
             AsyncTools.sync_run_coroutine(self.driver.switch_db(_db))
 
+            # 先删除表
+            try:
+                AsyncTools.sync_run_coroutine(self.driver.drop_collection('tb_full_type'))
+            except:
+                pass
+
             # tb_full_type
             AsyncTools.sync_run_coroutine(
                 self.driver.create_collection(
                     'tb_full_type', indexs={
-                        'idx_tb_full_type_c_index': {
+                        '%s_idx_tb_full_type_c_index' % _db: {
                             'keys': {
                                 'c_index': {'asc': 1}
                             },
@@ -271,14 +289,15 @@ class DriverTestCaseFW(object):
                         }
                     },
                     fixed_col_define={
-                        'c_index': {'type': 'str', 'len': 20},
-                        'c_str': {'type': 'str', 'len': 50},
-                        'c_str_no_len': {'type': 'str'},
+                        'c_index': {'type': 'str', 'len': 20, 'comment': '注释1'},
+                        'c_str': {'type': 'str', 'len': 50, 'comment': '注释2'},
+                        'c_str_no_len': {'type': 'str', 'comment': '注释3'},
                         'c_bool': {'type': 'bool'},
                         'c_int': {'type': 'int'},
                         'c_float': {'type': 'float'},
-                        'c_json': {'type': 'json'}
-                    }
+                        'c_json': {'type': 'json', 'comment': '注释4'}
+                    },
+                    comment='空类型表'
                 )
             )
 
@@ -1620,6 +1639,52 @@ class DriverTestCaseFW(object):
 
         return (True, _tips, '')
 
+    def test_null_data_3(self):
+        _tips = '数据类型3: 空值存入和比较'
+
+        # 获取测试库清单
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_test_dbs[0]))
+
+        # 清空测试表
+        _table_name = 'tb_full_type'
+        AsyncTools.sync_run_coroutine(self.driver.turncate_collection(_table_name))
+
+        # 插入不同类型的信息
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.insert_many(
+                _table_name, [
+                    {
+                        'c_index': 'i1',
+                        'c_str': None,
+                        # 'c_str_no_len': 'nostr1',
+                        'c_bool': True, 'c_int': 1,
+                        'c_float': 0.1, 'c_json': {'cj_1': 'cj_str_1', 'cj_2': False},
+                        'n_str': 'nstr1', 'n_int': 10, 'n_bool': True, 'n_float': 3.4,
+                        'n_json': {'nj_col_1': 'nj_val_1', 'nj_col_2': 3}
+                    },
+                ]
+            )
+        )
+        if _ret != 1:
+            return (False, _tips, 'insert test data 1 error: %s' % str(_ret))
+
+        # 通过空值查询数据
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                _table_name, filter={'c_index': 'i1', 'c_str': None, 'c_str_no_len': None},
+                projection=[
+                    'c_str', 'c_bool', 'c_int', 'c_float', 'c_json',
+                    'n_str', 'n_bool', 'n_int', 'n_float', 'n_json'
+                ]
+            )
+        )
+
+        if len(_ret) != 1:
+            return (False, _tips, 'query test data 1 error: %s' % str(_ret))
+
+        return (True, _tips, '')
+
     #############################
     # 分页
     #############################
@@ -1763,6 +1828,7 @@ class SQLiteDriverTestCase(DriverTestCaseFW):
                 'check_same_thread': False
             },
             driver_config={
+                'debug': True,
                 'close_action': 'commit',
                 'init_db': self.init_db,
                 'init_collections': self.init_collections
@@ -1854,11 +1920,453 @@ class MySQLDriverTestCase(DriverTestCaseFW):
                 'password': '123456'
             },
             driver_config={
+                'ignore_index_error': False,
+                'debug': True,
                 'close_action': 'commit',
                 'init_db': self.init_db,
                 'init_collections': self.init_collections
             }
         )
+
+    @property
+    def self_test_order(self) -> list:
+        """
+        当前驱动自有的测试清单
+        """
+        return ['self_test_partition_1', 'self_test_partition_2']
+
+    #############################
+    # 自有的测试函数
+    #############################
+    def self_test_partition_1(self) -> tuple:
+        _tips = '自有测试1: 测试分区处理'
+
+        # 建表参数
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        _db = _test_dbs[0]
+        _collection = 'tb_full_type_partition'
+        _indexs = {
+            'idx_tb_full_type_partition_c_index': {
+                'keys': {
+                    'c_index': {'asc': 1}
+                },
+                'paras': {
+                    'unique': True
+                }
+            }
+        }
+        _fixed_col_define = {
+            'c_index': {'type': 'str', 'len': 20, 'comment': '注释1'},
+            'c_str': {'type': 'str', 'len': 50, 'comment': '注释2'},
+            'c_str_no_len': {'type': 'str', 'comment': '注释3'},
+            'c_bool': {'type': 'bool'},
+            'c_int': {'type': 'int'},
+            'c_float': {'type': 'float'},
+            'c_json': {'type': 'json', 'comment': '注释4'}
+        }
+        _comment = '空类型表'
+
+        # 切换数据库并删除表
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_db))
+        try:
+            AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+        except:
+            pass
+
+        # 测试hash分区
+        _partition = {
+            'type': 'hash', 'count': 3,
+            'columns': [
+                {'col_name': 'c_int'}
+            ]
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test hash: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_int': 1},
+                {'c_index': 'r2', 'c_int': 2},
+                {'c_index': 'r3', 'c_int': 3},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test hash: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection
+        ))
+        if len(_ret) != 3:
+            return (False, _tips, 'test hash: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 测试key分区
+        _partition = {
+            'type': 'key', 'count': 3,
+            'columns': [
+                {'col_name': 'c_str', 'func': 'to_days({col_name})'},  # func应无效
+                {'col_name': 'c_int'}
+            ]
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test key: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 1},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 2},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 3},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test key: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection
+        ))
+        if len(_ret) != 3:
+            return (False, _tips, 'test key: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 测试range分区
+        _partition = {
+            'type': 'range',
+            'columns': [
+                {
+                    'col_name': 'c_int',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': 10},
+                        {'name': 'p_self_2', 'value': 20},
+                        {'name': 'p_self_3', 'value': None}
+                    ]
+                }
+            ]
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test range: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 5},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 15},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 30},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test range: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection, partition=['p_self_3']
+        ))
+        if len(_ret) != 1 or _ret[0]['c_int'] != 30:
+            return (False, _tips, 'test range: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 测试range columns分区
+        _partition = {
+            'type': 'range_columns',
+            'columns': [
+                {
+                    'col_name': 'c_int',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': 10},
+                        {'name': 'p_self_2', 'value': 20},
+                        {'name': 'p_self_3', 'value': None}
+                    ]
+                },
+                {
+                    'col_name': 'c_str',
+                    'range_list': [
+                        {'value': "'10'"},
+                        {'value': "'20'"},
+                        {'value': None}
+                    ]
+                }
+            ]
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test range columns: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 5},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 15},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 30},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test range columns: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 测试list分区
+        _partition = {
+            'type': 'list',
+            'columns': [
+                {
+                    'col_name': 'c_int',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': [1, 2, 3]},
+                        {'name': 'p_self_2', 'value': ["to_days('2021-01-01')", 5, 6]},
+                        {'name': 'p_self_3', 'value': [10, 11, 12]}
+                    ]
+                }
+            ]
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test list: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 3},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 5},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 10},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test list: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection, partition=['p_self_3']
+        ))
+        if len(_ret) != 1 or _ret[0]['c_int'] != 10:
+            return (False, _tips, 'test list: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 测试list columns分区
+        _partition = {
+            'type': 'list_columns',
+            'columns': [
+                {
+                    'col_name': 'c_str',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': ["'test1'"]},
+                        {'name': 'p_self_2', 'value': ["'test2'"]},
+                        {'name': 'p_self_3', 'value': ["'test3'"]}
+                    ]
+                }
+            ]
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test list columns: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 3},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 5},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 10},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test list columns: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection, partition=['p_self_3']
+        ))
+        if len(_ret) != 1 or _ret[0]['c_int'] != 10:
+            return (False, _tips, 'test list columns: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 返回成功
+        return (True, _tips, '')
+
+    def self_test_partition_2(self) -> tuple:
+        _tips = '自有测试2: 测试子分区处理'
+
+        # 建表参数
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        _db = _test_dbs[0]
+        _collection = 'tb_full_type_partition2'
+        _indexs = {
+            'idx_tb_full_type_partition2_c_index': {
+                'keys': {
+                    'c_index': {'asc': 1}
+                },
+                'paras': {
+                    'unique': True
+                }
+            }
+        }
+        _fixed_col_define = {
+            'c_index': {'type': 'str', 'len': 20, 'comment': '注释1'},
+            'c_str': {'type': 'str', 'len': 50, 'comment': '注释2'},
+            'c_str_no_len': {'type': 'str', 'comment': '注释3'},
+            'c_bool': {'type': 'bool'},
+            'c_int': {'type': 'int'},
+            'c_float': {'type': 'float'},
+            'c_json': {'type': 'json', 'comment': '注释4'}
+        }
+        _comment = '空类型表'
+
+        # 切换数据库并删除表
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_db))
+        try:
+            AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+        except:
+            pass
+
+        # 测试hash子分区, 指定分区名
+        _partition = {
+            'type': 'list_columns',
+            'columns': [
+                {
+                    'col_name': 'c_str',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': ["'test1'"]},
+                        {'name': 'p_self_2', 'value': ["'test2'"]},
+                        {'name': 'p_self_3', 'value': ["'test3'"]}
+                    ]
+                }
+            ],
+            'sub_partition': {
+                'type': 'hash', 'columns': [{'col_name': 'c_int'}], 'count': 2,
+                'sub_name': [['s0', 's1'], ['s2', 's3'], ['s4', 's5']]
+            }
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test sub_partition hash with name: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 3},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 5},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 10},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test sub_partition hash with name: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection, partition=['p_self_3']
+        ))
+        if len(_ret) != 1 or _ret[0]['c_int'] != 10:
+            return (False, _tips, 'test sub_partition hash with name: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 测试hash子分区, 不指定分区名
+        _partition = {
+            'type': 'list_columns',
+            'columns': [
+                {
+                    'col_name': 'c_str',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': ["'test1'"]},
+                        {'name': 'p_self_2', 'value': ["'test2'"]},
+                        {'name': 'p_self_3', 'value': ["'test3'"]}
+                    ]
+                }
+            ],
+            'sub_partition': {
+                'type': 'hash', 'columns': [{'col_name': 'c_int'}], 'count': 2
+            }
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test sub_partition hash no name: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 3},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 5},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 10},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test sub_partition hash no name: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection, partition=['p_self_3']
+        ))
+        if len(_ret) != 1 or _ret[0]['c_int'] != 10:
+            return (False, _tips, 'test sub_partition hash no name: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 测试key子分区
+        _partition = {
+            'type': 'list_columns',
+            'columns': [
+                {
+                    'col_name': 'c_str',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': ["'test1'"]},
+                        {'name': 'p_self_2', 'value': ["'test2'"]},
+                        {'name': 'p_self_3', 'value': ["'test3'"]}
+                    ]
+                }
+            ],
+            'sub_partition': {
+                'type': 'key', 'columns': [{'col_name': 'c_int'}, {'col_name': 'c_str_no_len'}], 'count': 2,
+                'sub_name': [['s0', 's1'], ['s2', 's3'], ['s4', 's5']]
+            }
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test sub_partition key with name: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 3, 'c_str_no_len': 'a'},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 5, 'c_str_no_len': 'b'},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 10, 'c_str_no_len': 'c'},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test sub_partition key with name: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 返回成功
+        return (True, _tips, '')
 
 
 class PgSQLDriverTestCase(DriverTestCaseFW):
@@ -1886,11 +2394,254 @@ class PgSQLDriverTestCase(DriverTestCaseFW):
                 'dbname': 'test_db'
             },
             driver_config={
+                'debug': True,
                 'close_action': 'commit',
                 'init_db': self.init_db,
                 'init_collections': self.init_collections
             }
         )
+
+    @property
+    def self_test_order(self) -> list:
+        """
+        当前驱动自有的测试清单
+        """
+        return ['self_test_partition_1', 'self_test_partition_2']
+
+    #############################
+    # 自有的测试函数
+    #############################
+    def self_test_partition_1(self) -> tuple:
+        _tips = '自有测试1: 测试分区处理'
+
+        # 建表参数
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        _db = _test_dbs[0]
+        _collection = 'tb_full_type_partition'
+        _indexs = {
+            'idx_tb_full_type_partition_c_index': {
+                'keys': {
+                    'c_index': {'asc': 1}
+                },
+                'paras': {
+                    'unique': True
+                }
+            }
+        }
+        _fixed_col_define = {
+            'c_index': {'type': 'str', 'len': 20, 'comment': '注释1'},
+            'c_str': {'type': 'str', 'len': 50, 'comment': '注释2'},
+            'c_str_no_len': {'type': 'str', 'comment': '注释3'},
+            'c_bool': {'type': 'bool'},
+            'c_int': {'type': 'int'},
+            'c_float': {'type': 'float'},
+            'c_json': {'type': 'json', 'comment': '注释4'}
+        }
+        _comment = '空类型表'
+
+        # 切换数据库并删除表
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_db))
+        try:
+            AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+        except:
+            pass
+
+        # 测试hash分区
+        _partition = {
+            'type': 'hash', 'count': 3,
+            'columns': [
+                {'col_name': 'c_int'}, {'col_name': 'c_str'}
+            ]
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test hash: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_int': 1, 'c_str': 'test1'},
+                {'c_index': 'r2', 'c_int': 2, 'c_str': 'test2'},
+                {'c_index': 'r3', 'c_int': 3, 'c_str': 'test3'},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test hash: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection
+        ))
+        if len(_ret) != 3:
+            return (False, _tips, 'test hash: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 测试range分区
+        _partition = {
+            'type': 'range',
+            'columns': [
+                {
+                    'col_name': 'c_int',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': 10},
+                        {'name': 'p_self_2', 'value': 20},
+                        {'name': 'p_self_3', 'value': None}
+                    ]
+                }
+            ]
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test range: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 5},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 15},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 30},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test range: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection, partition='p_self_3'
+        ))
+        if len(_ret) != 1 or _ret[0]['c_int'] != 30:
+            return (False, _tips, 'test range: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 测试list分区
+        _partition = {
+            'type': 'list',
+            'columns': [
+                {
+                    'col_name': 'c_int',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': [1, 2, 3]},
+                        {'name': 'p_self_2', 'value': ["cast(left('4test', 1) as int)", 5, 6]},
+                        {'name': 'p_self_3', 'value': [10, 11, 12]}
+                    ]
+                }
+            ]
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test list: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 3},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 5},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 10},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test list: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection, partition='p_self_3'
+        ))
+        if len(_ret) != 1 or _ret[0]['c_int'] != 10:
+            return (False, _tips, 'test list: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 返回成功
+        return (True, _tips, '')
+
+    def self_test_partition_2(self) -> tuple:
+        _tips = '自有测试2: 测试子分区处理'
+
+        # 建表参数
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        _db = _test_dbs[0]
+        _collection = 'tb_full_type_partition2'
+        _indexs = {
+            'idx_tb_full_type_partition2_c_index': {
+                'keys': {
+                    'c_index': {'asc': 1}
+                },
+                'paras': {
+                    'unique': True
+                }
+            }
+        }
+        _fixed_col_define = {
+            'c_index': {'type': 'str', 'len': 20, 'comment': '注释1'},
+            'c_str': {'type': 'str', 'len': 50, 'comment': '注释2'},
+            'c_str_no_len': {'type': 'str', 'comment': '注释3'},
+            'c_bool': {'type': 'bool'},
+            'c_int': {'type': 'int'},
+            'c_float': {'type': 'float'},
+            'c_json': {'type': 'json', 'comment': '注释4'}
+        }
+        _comment = '空类型表'
+
+        # 切换数据库并删除表
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_db))
+        try:
+            AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+        except:
+            pass
+
+        # 测试hash子分区
+        _partition = {
+            'type': 'list',
+            'columns': [
+                {
+                    'col_name': 'c_str',
+                    'range_list': [
+                        {'name': 'p_self_1', 'value': ["'test1'"]},
+                        {'name': 'p_self_2', 'value': ["'test2'"]},
+                        {'name': 'p_self_3', 'value': ["'test3'"]}
+                    ]
+                }
+            ],
+            'sub_partition': {
+                'type': 'hash', 'columns': [{'col_name': 'c_int'}], 'count': 2
+            }
+        }
+
+        AsyncTools.sync_run_coroutine(self.driver.create_collection(
+            _collection, indexs=_indexs, fixed_col_define=_fixed_col_define,
+            comment=_comment, partition=_partition
+        ))
+        if not AsyncTools.sync_run_coroutine(self.driver.collections_exists(_collection)):
+            return (False, _tips, 'test sub_partition hash with name: table [%s] not exists on db [%s]' % (_collection, _db))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.insert_many(
+            _collection, rows=[
+                {'c_index': 'r1', 'c_str': 'test1', 'c_int': 3},
+                {'c_index': 'r2', 'c_str': 'test2', 'c_int': 5},
+                {'c_index': 'r3', 'c_str': 'test3', 'c_int': 10},
+            ]
+        ))
+        if _ret != 3:
+            return (False, _tips, 'test sub_partition hash with name: insert [%s.%s] row error: %d' % (_db, _collection, _ret))
+
+        _ret = AsyncTools.sync_run_coroutine(self.driver.query_list(
+            _collection, partition='p_self_3'
+        ))
+        if len(_ret) != 1 or _ret[0]['c_int'] != 10:
+            return (False, _tips, 'test sub_partition hash with name: query [%s.%s] row error: %s' % (_db, _collection, str(_ret)))
+
+        AsyncTools.sync_run_coroutine(self.driver.drop_collection(_collection))
+
+        # 返回成功
+        return (True, _tips, '')
 
 
 class MongoDriverTestCase(DriverTestCaseFW):
@@ -1935,7 +2686,7 @@ class MongoDriverTestCase(DriverTestCaseFW):
 class TestSQLiteDriver(unittest.TestCase):
 
     def test(self):
-        # return
+        return
         # 初始化驱动
         _case = SQLiteDriverTestCase()
 
@@ -1993,7 +2744,7 @@ class TestMySQLDriver(unittest.TestCase):
 class TestPgSQLDriver(unittest.TestCase):
 
     def test(self):
-        return
+        # return
         # 初始化驱动
         _case = PgSQLDriverTestCase()
 

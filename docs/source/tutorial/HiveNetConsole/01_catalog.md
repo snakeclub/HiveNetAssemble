@@ -169,6 +169,29 @@ class YourClass(CmdBaseFW):
 
 
 
+### 开发命令执行函数的技巧
+
+#### 解析并获取命令行参数
+
+命令函数中可自行解析cmd_para来获取命令行传入的不同参数，更简便的方式是通过内置的 `self._cmd_para_to_dict` 函数来进行参数解析，来更快速地获取到所需的参数，例如：
+
+```
+# 示例: cmd_para = 'name1=name1_val name2=name2_val -n1 n1_val -n2 val3 val4'
+_para_dict = self._cmd_para_to_dict(cmd_para, name_with_sign=False)
+...
+
+所得到的_para_dict值为：
+{
+	'name1': 'name1_val', 'name2': 'name2_val',  # 长名字参数, key=value 模式
+	'n1': 'n1_val', 'n2': '',  # 短名字参数, -p value 模式
+	'{para}1': 'val3', '{para}2': 'val4'  # 无名字参数, key为'{para}序号', value为参数值
+}
+```
+
+
+
+
+
 ### 部署您的应用目录
 
 1、请将HiveNetConsole下的“conf/config.yaml”复制到您的应用目录下，例如"/yourapp/conf/config.yaml"；当然您也可以放到不同目录或指定不同文件名，但这样后续需要有些特殊的编码处理；
@@ -274,8 +297,38 @@ if __name__ == '__main__':
 说明如下：
 
 - “command ” 是命令字符，及在命令行中输入的最前面的词
+
 - 加载执行函数的说明可参考配置文件中的 "通用说明: 动态加载的命令函数通用配置"
+
 - “cmd_para” 是命令提示的参数，格式可参考prompt_plus
+
+  ```
+  {
+    # 名字参数 para1=value11 形式, 数组为可选值
+  	'name_para': {
+        'para1': ['value11', 'value12'],
+        'para2': ['value21', 'value22']
+    },
+    # 短参数(单字母) -a value1a 形式, 数组为可选值, None代表不带参数
+    'short_para': {
+        'a': ['value1a', 'value2a'],
+        'b': None,
+        'c': []
+    },
+    # 长参数(多字母) -abc value1abc 形式, 与短参数相似
+    'long_para': {
+        'abc': ['value1abc', 'value2abc'],
+        'bcd': None,
+        'ci': []
+    },
+    # 单词参数, 直接只有参数值, 参数之间用空格间隔
+    'word_para': {
+      'help': '',
+      'start': ''
+    }
+  }
+  ```
+
 - “help” 是命令的帮助，如上例，可以设置多语言的支持
 
 

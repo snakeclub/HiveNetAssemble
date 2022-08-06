@@ -22,6 +22,9 @@ __AUTHOR__ = u'黎慧剑'  # 作者
 __PUBLISH__ = '2018.09.30'  # 发布日期
 
 
+from ruamel.yaml.comments import CommentedSeq
+
+
 class ValueTool(object):
     """
     值处理通用工具
@@ -124,6 +127,108 @@ class ValueTool(object):
 
         return base_dict
 
+    @classmethod
+    def get_dict_value_by_path(cls, path: str, dict_obj: dict, default_value=None):
+        """
+        获取字典指定路径的值
+
+        @param {str} path - 检索路径
+            注1: 从根目录开始搜索, 路径下多个key之间使用'/'分隔, 例如 'root/key1/key2'
+            注2: 可以通过[索引值]搜索特定key下第几个配置(数组或字典), 例如 'root/key1[0]'搜素key1下第一个对象
+        @param {dict} dict_obj - 字典对象
+
+        @param {Any} default_value=None - 如果搜索不到返回的默认值
+        """
+        _last_obj = dict_obj
+        _paths = path.split('/')
+        _path_max_index = len(_paths) - 1  # 最后一个路径索引
+        try:
+            for _index in range(_path_max_index + 1):
+                # 获取路径中的完整信息
+                _key_paths = _paths[_index].split('[')
+                _key = _key_paths[0]  # 要搜索的key
+                _sub_idxs = []  # key下对象的第几个
+                for _sub_idx in range(1, len(_key_paths)):
+                    _sub_idxs.append(int(_key_paths[_sub_idx][0: -1]))
+
+                _sub_idxs_len = len(_sub_idxs)
+
+                _last_obj = _last_obj[_key]
+                for _idx in range(_sub_idxs_len):
+                    if type(_last_obj) in (CommentedSeq, list):
+                        # 按顺序获取指定位置的数组值
+                        _last_obj = _last_obj[_sub_idxs[_idx]]
+                    else:
+                        # 按字典顺序位置获取指定位置的字典
+                        _sub_key = list(_last_obj.keys())[_sub_idxs[_idx]]
+                        _last_obj = _last_obj[_sub_key]
+
+                if _index == _path_max_index:
+                    # 已经是最后一级, 返回对象的值即可
+                    return _last_obj
+        except:
+            # 获取异常, 返回默认值
+            return default_value
+
+    @classmethod
+    def set_dict_value_by_path(cls, path: str, dict_obj: dict, set_value):
+        """
+        设置字典指定路径的值
+
+        @param {str} path - 检索路径
+            注1: 从根目录开始搜索, 路径下多个key之间使用'/'分隔, 例如 'root/key1/key2'
+            注2: 可以通过[索引值]搜索特定key下第几个配置(数组或字典), 例如 'root/key1[0]'搜素key1下第一个对象
+        @param {dict} dict_obj - 字典对象
+        @param {Any} set_value - 要设置的值
+        """
+        _last_obj = dict_obj
+        _paths = path.split('/')
+        _path_max_index = len(_paths) - 1  # 最后一个路径索引
+        for _index in range(_path_max_index + 1):
+            # 获取路径中的完整信息
+            _key_paths = _paths[_index].split('[')
+            _key = _key_paths[0]  # 要搜索的key
+            _sub_idxs = []  # key下对象的第几个
+            for _sub_idx in range(1, len(_key_paths)):
+                _sub_idxs.append(int(_key_paths[_sub_idx][0: -1]))
+
+            _sub_idxs_len = len(_sub_idxs)
+            _max_sub_idx = _sub_idxs_len - 1
+
+            if _sub_idxs_len == 0:
+                # 没有位置索引的情况
+                if _index == _path_max_index:
+                    # 最后一级设置
+                    _last_obj[_key] = set_value
+                    return
+
+                # 要继续往下搜索
+                _last_obj = _last_obj[_key]
+
+                # 没有位置索引, 继续下一个搜索循环
+                continue
+
+            # 有位置索引的情况
+            _last_obj = _last_obj[_key]
+
+            # 逐级处理
+            for _idx in range(_sub_idxs_len):
+                if type(_last_obj) in (CommentedSeq, list):
+                    if _idx == _max_sub_idx and _index == _path_max_index:
+                        # 最后一级设置
+                        _last_obj[_sub_idxs[_idx]] = set_value
+                        return
+                    else:
+                        _last_obj = _last_obj[_sub_idxs[_idx]]
+                else:
+                    # 字典情况
+                    _sub_key = list(_last_obj.keys())[_sub_idxs[_idx]]
+                    if _idx == _max_sub_idx and _index == _path_max_index:
+                        _last_obj[_sub_key] = set_value
+                        return
+                    else:
+                        _last_obj = _last_obj[_sub_key]
+
 
 if __name__ == '__main__':
     # 当程序自己独立运行时执行的操作
@@ -132,4 +237,3 @@ if __name__ == '__main__':
            '作者: %s\n'
            '发布日期: %s\n'
            '版本: %s' % (__MOUDLE__, __DESCRIPT__, __AUTHOR__, __PUBLISH__, __VERSION__)))
-

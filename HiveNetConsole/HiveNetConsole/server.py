@@ -165,6 +165,25 @@ class ConsoleServer(object):
         else:
             _server.start_console()
 
+    @classmethod
+    def change_cmd_para_config(cls, cmd: str, cmd_para: dict):
+        """
+        动态修改命令行的参数提示配置
+
+        @param {str} cmd - 命令
+        @param {dict} cmd_para - 参数提示配置字典, 具体参数含义见HiveNetPromptPlus的prompt_plus手册
+        """
+        _console_global_para = RunTool.get_global_var('CONSOLE_GLOBAL_PARA')
+        if _console_global_para is None:
+            return
+
+        # 设置提示参数
+        _CMD_PARA = _console_global_para.get('CMD_PARA', None)
+        if _CMD_PARA is None:
+            return
+
+        _CMD_PARA[cmd] = cmd_para
+
     #############################
     # 内部变量
     #############################

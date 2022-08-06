@@ -111,6 +111,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 {
                     '数据库名': {
                         'index_only': False,  # 是否仅用于索引, 不创建
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -120,13 +121,19 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                     '数据库名': {
                         '集合名': {
                             'index_only': False,  # 是否仅用于索引, 不创建
+                            'comment': '',  # 集合注释
                             'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
                         }
                         ...
                     },
                     ...
                 }
+            init_yaml_file {str} - 要在启动时创建的数据库和集合(表)配置yaml文件
+                注1: 该参数用于将init_db和init_collections参数内容放置的配置文件中, 如果参数有值则忽略前面两个参数
+                注2: 配置文件为init_db和init_collections两个字典, 内容与这两个参数一致
             logger {Logger} - 传入驱动的日志对象
+            ignore_index_error {bool} - 是否忽略索引创建的异常, 默认为True
+            debug {bool} - 指定是否debug模式, 默认为False
             close_action {str} - 关闭连接时自动处理动作, None-不处理, 'commit'-自动提交, 'rollback'-自动回滚
         """
         super().__init__(
@@ -167,6 +174,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 {
                     '数据库名': {
                         'index_only': False,  # 是否仅用于索引, 不创建
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -176,6 +184,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                     '数据库名': {
                         '集合名': {
                             'index_only': False,  # 是否仅用于索引, 不创建
+                            'comment': '',  # 集合注释
                             'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
                         }
                         ...
@@ -183,6 +192,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                     ...
                 }
             logger {Logger} - 传入驱动的日志对象
+            debug {bool} - 指定是否debug模式, 默认为False
             close_action {str} - 关闭连接时自动处理动作, None-不处理, 'commit'-自动提交, 'rollback'-自动回滚
 
         @returns {dict} - 返回连接池的相关参数
@@ -343,7 +353,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
     #############################
     # 需要单独重载的函数
     #############################
-    async def switch_db(self, name: str):
+    async def switch_db(self, name: str, *args, **kwargs):
         """
         切换当前数据库到指定数据库
 
@@ -500,9 +510,12 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
             _sql = ' and '.join(_cds)
         else:
             # 直接相等的条件
-            _dbtype, _cmp_val = self._python_to_dbtype(val)
-            _sql = '%s = ?' % _key
-            sql_paras.append(_cmp_val)
+            if val is None:
+                _sql = '%s is NULL' % _key
+            else:
+                _dbtype, _cmp_val = self._python_to_dbtype(val)
+                _sql = '%s = ?' % _key
+                sql_paras.append(_cmp_val)
 
         return _sql
 
@@ -826,6 +839,27 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         return ','.join(_select), ','.join(_groupby)
 
+    def _get_col_default_value(self, val: str, dbtype: str) -> str:
+        """
+        获取字段的默认值
+
+        @param {str} val - 字符串形式的值
+        @param {str} dbtype - 数据类型
+
+        @returns {str} - 返回默认值的字符串
+        """
+        if dbtype in ('int', 'float'):
+            return str(val)
+        elif dbtype == 'bool':
+            return '1' if str(val).lower() == 'true' else '0'
+        elif dbtype == 'json':
+            if type(val) != str:
+                return "'%s'" % self._db_quotes_str(json.dumps(val, ensure_ascii=False))
+            else:
+                return "'%s'" % self._db_quotes_str(val)
+        else:
+            return "'%s'" % self._db_quotes_str(str(val))
+
     #############################
     # 生成SQL转换的处理函数
     #############################
@@ -874,7 +908,13 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         if kwargs.get('fixed_col_define', None) is not None:
             for _col_name, _col_def in kwargs['fixed_col_define'].items():
                 _cols.append(
-                    '%s %s' % (_col_name, self._dbtype_mapping(_col_def['type'], _col_def.get('len', None)))
+                    '%s %s%s%s' % (
+                        _col_name, self._dbtype_mapping(_col_def['type'], _col_def.get('len', None)),
+                        '' if _col_def.get('nullable', True) else ' not null',
+                        '' if _col_def.get('default', None) is None else ' default %s' % self._get_col_default_value(
+                            _col_def['default'], _col_def['type']
+                        )
+                    )
                 )
 
         # 建表脚本, 需要带上数据库前缀
@@ -962,7 +1002,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         # 剩余的内容放入扩展字段
         _cols.append('nosql_driver_extend_tags')
-        _sql_paras.append(self._python_to_dbtype(_row)[1])
+        _sql_paras.append(self._python_to_dbtype(_row, dbtype='json')[1])
 
         # 组成sql
         _sql = 'insert into %s(%s) values(%s)' % (
@@ -1010,7 +1050,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
             # 剩余的内容放入扩展字段
             _col_values.append('?')
-            _sql_paras.append(self._python_to_dbtype(_row)[1])
+            _sql_paras.append(self._python_to_dbtype(_row, dbtype='json')[1])
 
             # 添加到数组
             _para_array.extend(_sql_paras)

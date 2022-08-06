@@ -16,6 +16,7 @@ import sys
 import subprocess
 import warnings
 import copy
+import traceback
 import ruamel.yaml as yaml
 from collections.abc import Iterator
 from HiveNetCore.generic import CResult
@@ -75,8 +76,13 @@ class CmdBaseFW(object):
         _temp_kwargs = copy.deepcopy(self._kwargs)
         _temp_kwargs.update(kwargs)
 
-        _result = self._cmd_dealfun(message=message, cmd=cmd,
-                                    cmd_para=cmd_para, prompt_obj=prompt_obj, **_temp_kwargs)
+        try:
+            _result = self._cmd_dealfun(message=message, cmd=cmd,
+                                        cmd_para=cmd_para, prompt_obj=prompt_obj, **_temp_kwargs)
+        except:
+            # 执行出现异常
+            _result = CResult('29999')
+            _result.print_str = traceback.format_exc()
 
         _real_result = self._i18n_result_obj(
             _result, prompt_obj=prompt_obj,
@@ -305,6 +311,7 @@ class CommonCmd(CmdBaseFW):
     通用命令处理
     支持help、syscmd命令
     """
+
     #############################
     # 构造函数, 在里面增加函数映射字典
     #############################

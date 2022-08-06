@@ -18,6 +18,7 @@ import logging
 from bson import ObjectId
 from typing import Any, Union
 from urllib.parse import quote_plus
+from HiveNetCore.yaml import SimpleYaml, EnumYamlObjType
 from HiveNetCore.utils.run_tool import AsyncTools
 # 自动安装依赖库
 from HiveNetCore.utils.pyenv_tool import PythonEnvTools
@@ -76,6 +77,7 @@ class MongoNosqlDriver(NosqlDriverFW):
                 {
                     '数据库名': {
                         'index_only': False,  # 是否仅用于索引, 不创建
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -85,12 +87,16 @@ class MongoNosqlDriver(NosqlDriverFW):
                     '数据库名': {
                         '集合名': {
                             'index_only': False,  # 是否仅用于索引, 不创建
+                            'comment': '',  # 集合注释
                             'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
                         }
                         ...
                     },
                     ...
                 }
+            init_yaml_file {str} - 要在启动时创建的数据库和集合(表)配置yaml文件
+                注1: 该参数用于将init_db和init_collections参数内容放置的配置文件中, 如果参数有值则忽略前面两个参数
+                注2: 配置文件为init_db和init_collections两个字典, 内容与这两个参数一致
             logger {Logger} - 传入驱动的日志对象
         """
         # 参数处理
@@ -152,8 +158,23 @@ class MongoNosqlDriver(NosqlDriverFW):
             self._db = self._client.get_database(name=connect_config['usedb'])
 
         # 启动后创建数据库
+        if self._driver_config.get('init_yaml_file', None) is None:
+            _init_db = self._driver_config.get('init_db', {})
+            _init_collections = self._driver_config.get('init_collections', {})
+        else:
+            _init_yaml = SimpleYaml(
+                self._driver_config['init_yaml_file'], obj_type=EnumYamlObjType.File,
+                encoding='utf-8'
+            )
+            _init_db = _init_yaml.get_value('init_db', default={})
+            if _init_db is None:
+                _init_db = {}
+            _init_collections = _init_yaml.get_value('init_collections', default={})
+            if _init_collections is None:
+                _init_collections = {}
+
         _temp_db_name = self._db.name
-        for _name, _db_info in self._driver_config.get('init_db', {}).items():
+        for _name, _db_info in _init_db.items():
             if _db_info.get('index_only', False):
                 # 只索引不创建
                 continue
@@ -167,10 +188,9 @@ class MongoNosqlDriver(NosqlDriverFW):
         AsyncTools.sync_run_coroutine(self.switch_db(_temp_db_name))
 
         # 启动驱动时创建集合(表)
-        if driver_config.get('init_collections', None) is not None:
-            AsyncTools.sync_run_coroutine(
-                self._init_collections(driver_config['init_collections'])
-            )
+        AsyncTools.sync_run_coroutine(
+            self._init_collections(_init_collections)
+        )
 
     #############################
     # 主动销毁驱动
@@ -204,7 +224,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         """
         await self.switch_db(name)
 
-    async def switch_db(self, name: str):
+    async def switch_db(self, name: str, *args, **kwargs):
         """
         切换当前数据库到指定数据库
 
@@ -212,7 +232,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         """
         self._db = self._client.get_database(name=name)
 
-    async def list_dbs(self) -> list:
+    async def list_dbs(self, *args, **kwargs) -> list:
         """
         列出数据库清单
 
@@ -221,7 +241,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         _result = await self._client.list_database_names()
         return _result
 
-    async def drop_db(self, name: str):
+    async def drop_db(self, name: str, *args, **kwargs):
         """
         删除数据库
 
@@ -239,7 +259,8 @@ class MongoNosqlDriver(NosqlDriverFW):
     #############################
     # 集合操作
     #############################
-    async def create_collection(self, collection: str, indexs: dict = None, fixed_col_define: dict = None):
+    async def create_collection(self, collection: str, indexs: dict = None, fixed_col_define: dict = None,
+            comment: str = None, **kwargs):
         """
         创建集合(相当于关系型数据库的表, 如果不存在则创建)
         注意: 所有集合都有必须有 '_id' 这个记录的唯一主键字段
@@ -264,10 +285,15 @@ class MongoNosqlDriver(NosqlDriverFW):
             {
                 '字段名': {
                     'type': '字段类型(str, int, float, bool, json)',
-                    'len': 字段长度
+                    'len': 字段长度,
+                    'nullable': True,  # 是否可空
+                    'default': 默认值,
+                    'comment': '字段注释'
                 },
                 ...
             }
+        @param {str} comment=None - 集合注释
+        @param {kwargs} - 实现驱动自定义支持的参数
 
         @throws {CollectionInvalid} - 当集合已存在将抛出该异常
         """
@@ -293,9 +319,10 @@ class MongoNosqlDriver(NosqlDriverFW):
                 _indexs.append(IndexModel(_keys, **_kwargs))
 
             # 创建索引
-            await _collection.create_indexes(_indexs)
+            if len(_indexs) > 0:
+                await _collection.create_indexes(_indexs)
 
-    async def list_collections(self, filter: dict = None) -> list:
+    async def list_collections(self, filter: dict = None, **kwargs) -> list:
         r"""
         获取所有集合(表)清单
 
@@ -306,7 +333,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         """
         return await self._db.list_collection_names(filter=filter)
 
-    async def drop_collection(self, collection: str):
+    async def drop_collection(self, collection: str, *args, **kwargs):
         """
         删除集合
         注: 集合不存在也正常返回
@@ -315,7 +342,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         """
         await self._db.drop_collection(collection)
 
-    async def turncate_collection(self, collection: str):
+    async def turncate_collection(self, collection: str, *args, **kwargs):
         """
         清空集合记录
 
@@ -323,7 +350,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         """
         await self._db.get_collection(collection).delete_many({})
 
-    async def collections_exists(self, collection: str) -> bool:
+    async def collections_exists(self, collection: str, *args, **kwargs) -> bool:
         """
         判断集合(表)是否存在
 
@@ -338,7 +365,7 @@ class MongoNosqlDriver(NosqlDriverFW):
     # 事务支持
     # 注: MongoDB 4.0+ 才能支持事务, 并且单个mongodb server 不支持事务
     #############################
-    async def start_transaction(self) -> Any:
+    async def start_transaction(self, *args, **kwargs) -> Any:
         """
         启动事务
         注: 通过该方法处理事务, 必须显式通过commit_transaction或abort_transaction关闭事务
@@ -349,7 +376,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         _session.start_transaction()
         return _session
 
-    async def commit_transaction(self, session):
+    async def commit_transaction(self, session, *args, **kwargs):
         """
         提交事务
 
@@ -360,7 +387,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         # 关闭session
         await session.end_session()
 
-    async def abort_transaction(self, session):
+    async def abort_transaction(self, session, *args, **kwargs):
         """
         回滚事务
 
@@ -374,7 +401,7 @@ class MongoNosqlDriver(NosqlDriverFW):
     #############################
     # 数据操作
     #############################
-    async def insert_one(self, collection: str, row: dict, session: Any = None) -> str:
+    async def insert_one(self, collection: str, row: dict, session: Any = None, **kwargs) -> str:
         """
         插入一条记录
 
@@ -388,7 +415,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         _result = await self._db.get_collection(collection).insert_one(row, session=session)
         return str(_result.inserted_id)
 
-    async def insert_many(self, collection: str, rows: list, session: Any = None) -> int:
+    async def insert_many(self, collection: str, rows: list, session: Any = None, **kwargs) -> int:
         """
         插入多条记录
 
@@ -403,7 +430,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         return len(_result.inserted_ids)
 
     async def update(self, collection: str, filter: dict, update: dict, multi: bool = True,
-             upsert: bool = False, hint: dict = None, session: Any = None) -> int:
+             upsert: bool = False, hint: dict = None, session: Any = None, **kwargs) -> int:
         """
         更新找到的记录
 
@@ -442,7 +469,8 @@ class MongoNosqlDriver(NosqlDriverFW):
 
         return _result.modified_count
 
-    async def delete(self, collection: str, filter: dict, multi: bool = True, hint: dict = None, session: Any = None) -> int:
+    async def delete(self, collection: str, filter: dict, multi: bool = True,
+            hint: dict = None, session: Any = None, **kwargs) -> int:
         """
         删除指定记录
 
@@ -472,7 +500,8 @@ class MongoNosqlDriver(NosqlDriverFW):
     # 数据查询
     #############################
     async def query_list(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
-            sort: list = None, skip: int = None, limit: int = None, hint: dict = None, session: Any = None) -> list:
+            sort: list = None, skip: int = None, limit: int = None, hint: dict = None,
+            session: Any = None, **kwargs) -> list:
         """
         查询记录(直接返回清单)
 
@@ -515,7 +544,7 @@ class MongoNosqlDriver(NosqlDriverFW):
 
     async def query_iter(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
             sort: list = None, skip: int = None, limit: int = None, hint: dict = None, fetch_each: int = 1,
-            session: Any = None):
+            session: Any = None, **kwargs):
         """
         查询记录(通过迭代对象依次返回)
 
@@ -564,7 +593,7 @@ class MongoNosqlDriver(NosqlDriverFW):
 
     async def query_count(self, collection: str, filter: dict = None,
             skip: int = None, limit: int = None, hint: dict = None, overtime: float = None,
-            session: Any = None) -> int:
+            session: Any = None, **kwargs) -> int:
         """
         获取匹配查询条件的结果数量
 
@@ -595,7 +624,7 @@ class MongoNosqlDriver(NosqlDriverFW):
 
     async def query_group_by(self, collection: str, group: dict = None, filter: dict = None,
             projection: Union[dict, list] = None, sort: list = None,
-            overtime: float = None, session: Any = None) -> list:
+            overtime: float = None, session: Any = None, **kwargs) -> list:
         """
         获取记录聚合统计的结果
 
@@ -725,7 +754,8 @@ class MongoNosqlDriver(NosqlDriverFW):
                 # 建表操作
                 await self.create_collection(
                     _collection, indexs=_info.get('indexs', None),
-                    fixed_col_define=_info.get('fixed_col_define', None)
+                    fixed_col_define=_info.get('fixed_col_define', None),
+                    comment=_info.get('comment', None)
                 )
 
         # 切换回开始的数据库

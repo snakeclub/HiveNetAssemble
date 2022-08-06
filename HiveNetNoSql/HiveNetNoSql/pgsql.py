@@ -126,6 +126,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 {
                     '数据库名': {
                         'index_only': False,  # 是否仅用于索引, 不创建
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -135,13 +136,19 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                     '数据库名': {
                         '集合名': {
                             'index_only': False,  # 是否仅用于索引, 不创建
-                            'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
+                            'comment': '',  # 集合注释
+                            'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}, 'partition': {表分区定义}
                         }
                         ...
                     },
                     ...
                 }
+            init_yaml_file {str} - 要在启动时创建的数据库和集合(表)配置yaml文件
+                注1: 该参数用于将init_db和init_collections参数内容放置的配置文件中, 如果参数有值则忽略前面两个参数
+                注2: 配置文件为init_db和init_collections两个字典, 内容与这两个参数一致
             logger {Logger} - 传入驱动的日志对象
+            ignore_index_error {bool} - 是否忽略索引创建的异常, 默认为True
+            debug {bool} - 指定是否debug模式, 默认为False
             close_action {str} - 关闭连接时自动处理动作, None-不处理, 'commit'-自动提交, 'rollback'-自动回滚
             regexp_ignore_case {bool} - 正则表达式是否忽略大小写, 默认为False
         """
@@ -151,6 +158,79 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
 
         # 指定使用独立的insert_many语句, 性能更高
         self._use_insert_many_generate_sqls = True
+
+    #############################
+    # 特殊的重载函数
+    #############################
+    async def create_collection(self, collection: str, indexs: dict = None, fixed_col_define: dict = None,
+            comment: str = None, **kwargs):
+        """
+        创建集合(相当于关系型数据库的表, 如果不存在则创建)
+        注意: 所有集合都有必须有 '_id' 这个记录的唯一主键字段
+
+        @param {str} collection - 集合名(表名)
+        @param {dict} indexs=None - 要创建的索引字典, 格式为:
+            {
+                '索引名': {
+                    --索引的字段清单
+                    'keys': {
+                        '字段名': { 'asc': 是否升序(1为升序, -1为降序) },
+                        ...
+                    }
+                    --创建参数
+                    'paras': {
+                        'unique': 是否唯一索引(True/False),
+                        ...驱动实现类自定义支持的参数
+                    }
+                },
+            }
+        @param {dict} fixed_col_define=None - 固定字段定义(只有固定字段才能进行索引), 格式如下:
+            {
+                '字段名': {
+                    'type': '字段类型(str, int, float, bool, json)',
+                    'len': 字段长度,
+                    'nullable': True,  # 是否可空
+                    'default': 默认值,
+                    'comment': '字段注释'
+                },
+                ...
+            }
+        @param {str} comment=None - 集合注释
+        @param {kwargs} - 实现驱动自定义支持的参数
+            partition {dict} - 表分区设置
+                type : str, 指定创建分区的类型，可支持的分区类型如下：
+                    range - 范围分区, 支持通过表达式对分区字段进行格式转换(同步需配置转换表达式)
+                        注1: 支持设置多个分区字段
+                        注2: 每个分区的范围设置只有一个比较值, 实际符合分区的取值范围为"上一分区比较值 <= 字段值 < 当前分区比较值"
+                        注3: 将自动创建一个默认分区, 当分区字段值无法匹配设置的分区时, 将存入默认分区中
+                    list - 列表分区, 支持通过表达式对分区字段进行格式转换(同步需配置转换表达式)
+                        注1: 分区字段仅支持设置单个字段
+                        注2: 符合分区的取值范围为在数组中能找到的字段值
+                        注3: 将自动创建一个默认分区, 当分区字段值无法匹配设置的分区时, 将存入默认分区中
+                    hash - 哈希分区
+                        注1: 支持设置多个分区字段
+                        注2: hash类型分区不支持分区范围的设置, 而是通过count参数指定要拆分的分区数量
+                count: int, 拆分的分区数量, 仅hash的分区类型有效
+                columns : list, 分区字段设置, 列表每个值为对应的一个分区字段设置字典, 定义如下:
+                    col_name : str, 分区字段名
+                    func : str, 转换函数表达式, 可通过{col_name}进行字段名的替换, 例如to_days({col_name})
+                    range_list : list, 分区条件列表, 设置每个分区名和分区条件比较值, 仅range, list使用
+                        name : str, 分区名, 不设置或设置为None代表自动生成分区名, 如果不是第一个分区字段无需设置(统一使用第一个分区字段的对应分区名)
+                        value : any, 分区条件比较值, 按不同分区类型应设置为不同的值
+                            注1: 如果为range, 该值设置为单一比较常量值, 例如 3, "'test'", "to_days('2021-10-11')", None(代表最大值MAXVALUE)
+                            注2: 如果为list, 该值应设置为list, 例如 [3, "'test'", 5, "to_days('2021-01-01')", None], None代表NULL
+                            注3: 如果值为字符串, 应使用单引号进行包裹, 例如"'str_value'"
+                sub_partition: dict, 子分区设置, 定义与主分区一致, 可以嵌套形成多级子分区
+                    注意: 每个主分区下都会嵌套创建一套相同的子分区
+                注: 使用表分区的限制:
+                    1. 如果 _id 没有作为分区条件, 则仅创建普通索引而非唯一索引, _id 的唯一性数据库层面不控制, 需要由应用自行控制
+                    2. 要创建唯一索引的字段必须作为分区条件之一, 否则将会作为普通索引而非唯一索引来创建
+        """
+        # 只是单纯解决注释问题
+        await super().create_collection(
+            collection, indexs=indexs, fixed_col_define=fixed_col_define, comment=comment,
+            **kwargs
+        )
 
     #############################
     # 需要继承类实现的内部函数
@@ -186,6 +266,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 {
                     '数据库名': {
                         'index_only': False,  # 是否仅用于索引, 不创建
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -195,6 +276,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                     '数据库名': {
                         '集合名': {
                             'index_only': False,  # 是否仅用于索引, 不创建
+                            'comment': '',  # 集合注释
                             'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
                         }
                         ...
@@ -202,6 +284,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                     ...
                 }
             logger {Logger} - 传入驱动的日志对象
+            debug {bool} - 指定是否debug模式, 默认为False
             close_action {str} - 关闭连接时自动处理动作, None-不处理, 'commit'-自动提交, 'rollback'-自动回滚
             regexp_ignore_case {bool} - 正则表达式是否忽略大小写, 默认为False
         @returns {dict} - 返回连接池的相关参数
@@ -385,7 +468,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
     #############################
     # 需要单独重载的函数
     #############################
-    async def switch_db(self, name: str):
+    async def switch_db(self, name: str, *args, **kwargs):
         """
         切换当前数据库到指定数据库
 
@@ -510,13 +593,13 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 _is_json = True
                 _col_type = fixed_col_define.get('define', {}).get(_key, {}).get('type', None)
                 if _col_type is None:
-                    _key = "nosql_driver_extend_tags->'%s'" % key
+                    _key = "\"nosql_driver_extend_tags\"->'%s'" % key
                     _cast_by_val = True
                 elif _col_type == 'str':
                     # 字符串返回, 否则会带双引号
-                    _key = "nosql_driver_extend_tags->>'%s'" % key
+                    _key = "\"nosql_driver_extend_tags\"->>'%s'" % key
                 else:
-                    _key = "cast(nosql_driver_extend_tags->'%s' as %s)" % (
+                    _key = "cast(\"nosql_driver_extend_tags\"->'%s' as %s)" % (
                         key, self._dbtype_cast_mapping[_col_type]
                     )
 
@@ -529,15 +612,19 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                     _dbtype, _cmp_val = self._python_to_dbtype(_para)
                     if _is_json and _cast_by_val:
                         if _dbtype == 'str':
-                            _key = "nosql_driver_extend_tags->>'%s'" % key
+                            _key = "\"nosql_driver_extend_tags\"->>'%s'" % key
                         else:
                             _key = 'cast(%s as %s)' % (_key, self._dbtype_cast_mapping[_dbtype])
+                    else:
+                        _key = '"%s"' % _key
 
                     _cds.append('%s %s %s' % (_key, self._filter_symbol_mapping[_op], '%s'))
                     sql_paras.append(_cmp_val)
                 elif _op == '$regex':
                     if _is_json and _cast_by_val:
-                        _key = "nosql_driver_extend_tags->>'%s'" % key
+                        _key = "\"nosql_driver_extend_tags\"->>'%s'" % key
+                    else:
+                        _key = '"%s"' % _key
 
                     _cds.append("%s %s %s" % (_key, self._regexp_op, '%s'))
                     sql_paras.append(_para)
@@ -546,15 +633,18 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             _sql = ' and '.join(_cds)
         else:
             # 直接相等的条件
-            _dbtype, _cmp_val = self._python_to_dbtype(val)
-            if _is_json and _cast_by_val:
-                if _dbtype == 'str':
-                    _key = "nosql_driver_extend_tags->>'%s'" % key
-                else:
-                    _key = 'cast(%s as %s)' % (_key, self._dbtype_cast_mapping[_dbtype])
+            if val is None:
+                _sql = '%s is NULL' % (_key if _is_json else '"%s"' % _key)
+            else:
+                _dbtype, _cmp_val = self._python_to_dbtype(val)
+                if _is_json and _cast_by_val:
+                    if _dbtype == 'str':
+                        _key = "\"nosql_driver_extend_tags\"->>'%s'" % key
+                    else:
+                        _key = 'cast(%s as %s)' % (_key, self._dbtype_cast_mapping[_dbtype])
 
-            _sql = '%s = %s' % (_key, '%s')
-            sql_paras.append(_cmp_val)
+                _sql = '%s = %s' % (_key if _is_json else '"%s"' % _key, '%s')
+                sql_paras.append(_cmp_val)
 
         return _sql
 
@@ -643,17 +733,17 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                     elif _op == '$unset':
                         _upd_dict[_key] = {'sql': 'null', 'paras': []}
                     elif _op == '$inc':
-                        _upd_dict[_key] = {'sql': 'COALESCE(%s,0) + %s' % (_key, '%s'), 'paras': [_val]}
+                        _upd_dict[_key] = {'sql': 'COALESCE("%s",0) + %s' % (_key, '%s'), 'paras': [_val]}
                     elif _op == '$mul':
-                        _upd_dict[_key] = {'sql': 'COALESCE(%s,0) * %s' % (_key, '%s'), 'paras': [_val]}
+                        _upd_dict[_key] = {'sql': 'COALESCE("%s",0) * %s' % (_key, '%s'), 'paras': [_val]}
                     elif _op == '$min':
                         _upd_dict[_key] = {
-                            'sql': 'case when COALESCE({key}, {pos}) < {pos} then COALESCE({key},0) else {pos} end'.format(key=_key, pos='%s'),
+                            'sql': 'case when COALESCE("{key}", {pos}) < {pos} then COALESCE("{key}",0) else {pos} end'.format(key=_key, pos='%s'),
                             'paras': [_val, _val, _val]
                         }
                     elif _op == '$max':
                         _upd_dict[_key] = {
-                            'sql': 'case when COALESCE({key}, {pos}) > {pos} then COALESCE({key},0) else {pos} end'.format(key=_key, pos='%s'),
+                            'sql': 'case when COALESCE("{key}", {pos}) > {pos} then COALESCE("{key}",0) else {pos} end'.format(key=_key, pos='%s'),
                             'paras': [_val, _val, _val]
                         }
                     else:
@@ -701,7 +791,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         # 开始生成sql语句和返回参数
         _sqls = []
         for _key, _val in _upd_dict.items():
-            _sqls.append('%s=%s' % (_key, _val['sql']))
+            _sqls.append('"%s"=%s' % (_key, _val['sql']))
             if _val['paras'] is not None:
                 sql_paras.extend(_val['paras'])
 
@@ -772,7 +862,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _real_cols = []
         for _col in _projection:
             if _col in _fixed_cols:
-                _real_cols.append('%s' % _col)
+                _real_cols.append('"%s"' % _col)
                 continue
             else:
                 # 其他非固定字段
@@ -808,7 +898,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         """
         if fixed_col_define is None:
             # 全部认为是固定字段
-            _sorts = ['%s %s' % (_item[0], 'asc' if _item[1] == 1 else 'desc') for _item in sort]
+            _sorts = ['"%s" %s' % (_item[0], 'asc' if _item[1] == 1 else 'desc') for _item in sort]
         else:
             _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
             _fixed_cols.append('_id')
@@ -816,7 +906,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             for _item in sort:
                 _col = _item[0]
                 if _col in _fixed_cols:
-                    _sorts.append('%s %s' % (_col, 'asc' if _item[1] == 1 else 'desc'))
+                    _sorts.append('"%s" %s' % (_col, 'asc' if _item[1] == 1 else 'desc'))
                 else:
                     # 属于扩展字段
                     _sorts.append("nosql_driver_extend_tags->'%s' %s" % (_col, 'asc' if _item[1] == 1 else 'desc'))
@@ -885,7 +975,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                         else:
                             _col = "nosql_driver_extend_tags->'%s'" % _col
                     else:
-                        _col = "%s" % _col
+                        _col = '"%s"' % _col
 
                     _select.append('%s(%s) as %s' % (_op_mapping[_op], _col, _key))
                 else:
@@ -903,7 +993,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                     else:
                         _col = "nosql_driver_extend_tags->'%s'" % _col
                 else:
-                    _col = "%s" % _col
+                    _col = '"%s"' % _col
 
                 _select.append('%s as %s' % (_col, _key))
                 _groupby.append(_col)
@@ -913,6 +1003,193 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 sql_paras.append(_val)
 
         return ','.join(_select), ','.join(_groupby)
+
+    def _db_quotes_str_default(self, val: str) -> str:
+        """
+        数据库单引号转义处理(仅默认值使用, 不转义双引号)
+
+        @param {str} val - 要处理的字符串
+
+        @returns {str} - 转义处理后的字符串, 注意不包含外面的引号
+        """
+        return val.replace('\\', '\\\\').replace('\r', '\\r').replace(
+            '\n', '\\n').replace('\t', '\\t').replace("'", "''")  # .replace('"', '\\"')
+
+    def _get_col_default_value(self, val: str, dbtype: str) -> str:
+        """
+        获取字段的默认值
+
+        @param {str} val - 字符串形式的值
+        @param {str} dbtype - 数据类型
+
+        @returns {str} - 返回默认值的字符串
+        """
+        if dbtype in ('int', 'float'):
+            return str(val)
+        elif dbtype == 'bool':
+            return 'true' if str(val).lower() == 'true' else 'false'
+        elif dbtype == 'json':
+            if type(val) != str:
+                return "'%s'" % self._db_quotes_str_default(json.dumps(val, ensure_ascii=False))
+            else:
+                return "'%s'" % self._db_quotes_str_default(val)
+        else:
+            return "'%s'" % self._db_quotes_str_default(str(val))
+
+    def _get_partition_sql(self, db_name: str, collection: str, partition: dict,
+            add_partition_sqls: list = [], partition_cols: list = []) -> str:
+        """
+        生成分区创建sql语句
+
+        @param {str} db_name - 数据库名
+        @param {str} collection - 表名
+        @param {dict} partition - 分区创建配置字典
+        @param {list} add_partition_sqls=[] - 创建分区表的语句
+        @param {list} partition_cols=[] - 分区涉及到的字段清单
+
+        @returns {str} - 建表分区指定语句
+        """
+        # 复制参数对象
+        _partition = copy.deepcopy(partition)
+        # 组装sql需要用到的sql关键字字典
+        _type_sql_mapping = {
+            'range': {
+                'name_sql': 'RANGE', 'value_sql': 'FOR VALUES FROM',
+                'is_columns': True
+            },
+            'list': {
+                'name_sql': 'LIST', 'value_sql': 'FOR VALUES IN',
+                'is_columns': False
+            },
+            'hash': {
+                'name_sql': 'HASH', 'value_sql': 'FOR VALUES WITH',
+                'is_columns': True
+            }
+        }
+
+        _type_sql_para = _type_sql_mapping[_partition['type']]
+
+        # 非多列模式的分区条件清单只取第一个参数
+        if _type_sql_para['is_columns']:
+            _columns = _partition['columns']
+        else:
+            # 只支持单字段
+            _columns = _partition['columns'][0: 1]
+
+        _cols = []  # 分区字段清单
+        _partition_configs = []  # 分区定义清单
+        for _index in range(len(_columns)):
+            _column = _columns[_index]
+
+            # 分区字段清单处理
+            if _column['col_name'] not in partition_cols:
+                # 登记分区涉及的字段清单
+                partition_cols.append(_column['col_name'])
+
+            if _column.get('func', '') == '':
+                _cols.append('"%s"' % _column['col_name'])
+            else:
+                # 表达式
+                _cols.append(_column['func'].format(col_name='"%s"' % _column['col_name']))
+
+            if _partition['type'] == 'hash':
+                # 哈希分区不需要处理range_list
+                continue
+
+            _last_values = 'MINVALUE'
+            for _range_index in range(len(_column['range_list'])):
+                _range = _column['range_list'][_range_index]
+
+                # 分区后缀名
+                _partition_name = None
+                if _index == 0:
+                    _partition_name = ('p%d' % _range_index) if _range.get('name', None) is None else _range['name']
+
+                # 值处理
+                if _partition['type'] == 'range':
+                    # 范围模式, 形成最小值, 最大值范围数组
+                    _temp_value = 'MAXVALUE' if _range['value'] is None else str(_range['value'])
+                    _value = [_last_values, _temp_value]
+                    _last_values = _temp_value  # 修改最小值
+
+                    # 添加到分区配置
+                    if _index == 0:
+                        _partition_configs.append({
+                            'name': _partition_name, 'values': {'sm': [_value[0]], 'lg': [_value[1]]}
+                        })
+                    else:
+                        _partition_configs[_range_index]['values']['sm'].append(_value[0])
+                        _partition_configs[_range_index]['values']['lg'].append(_value[1])
+                else:
+                    # 列表模式, 直接就是数组
+                    _value = []
+                    for _temp_value in _range['value']:
+                        _value.append('NULL' if _temp_value is None else str(_temp_value))
+
+                    # 添加到分区配置
+                    if _index == 0:
+                        _partition_configs.append({
+                            'name': _partition_name, 'values': _value
+                        })
+                    else:
+                        _partition_configs[_range_index]['values'].extend(_value)
+
+        # hash 模式的_partition_configs处理
+        if _partition['type'] == 'hash':
+            for _index in range(_partition['count']):
+                _partition_configs.append({
+                    'name': 'p%d' % _index, 'values': _index
+                })
+
+        # 建表分区指定语句
+        _partition_sql = 'PARTITION BY %s (%s)' % (
+            _type_sql_para['name_sql'], ','.join(_cols)
+        )
+
+        # 创建分区表语句
+        for _partition_config in _partition_configs:
+            _add_partition_sql = 'create table if not exists "{db_name}"."{collection}_{pname}" PARTITION OF "{db_name}"."{collection}" {value_sql}'.format(
+                db_name=db_name, collection=collection, pname=_partition_config['name'],
+                value_sql=_type_sql_para['value_sql']
+            )
+            if _partition['type'] == 'range':
+                _add_partition_sql = '%s (%s) TO (%s)' % (
+                    _add_partition_sql,
+                    ','.join(_partition_config['values']['sm']),
+                    ','.join(_partition_config['values']['lg'])
+                )
+            elif _partition['type'] == 'list':
+                _add_partition_sql = '%s (%s)' % (_add_partition_sql, ','.join(_partition_config['values']))
+            else:
+                # hash
+                _add_partition_sql = '%s (MODULUS %d, REMAINDER %d)' % (
+                    _add_partition_sql, _partition['count'], _partition_config['values']
+                )
+
+            _add_sub_partition_sqls = []
+            if _partition.get('sub_partition', None) is not None:
+                _sub_partition_sql = self._get_partition_sql(
+                    db_name, '%s_%s' % (collection, _partition_config['name']), _partition['sub_partition'],
+                    add_partition_sqls=_add_sub_partition_sqls, partition_cols=partition_cols
+                )
+                # 分区创建语句添加分区定义
+                _add_partition_sql = '%s %s' % (_add_partition_sql, _sub_partition_sql)
+
+            # 添加到分区创建脚本数组
+            add_partition_sqls.append(_add_partition_sql)
+
+            # 添加子分区的创建脚本
+            add_partition_sqls.extend(_add_sub_partition_sqls)
+
+        # 添加默认分区
+        if _partition['type'] != 'hash':
+            _add_partition_sql = 'create table if not exists "{db_name}"."{collection}_{pname}" PARTITION OF "{db_name}"."{collection}" {value_sql}'.format(
+                db_name=db_name, collection=collection, pname='p_default',
+                value_sql='DEFAULT'
+            )
+            add_partition_sqls.append(_add_partition_sql)
+
+        return _partition_sql
 
     #############################
     # 生成SQL转换的处理函数
@@ -937,7 +1214,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _checks.append(None)
 
         # 组成sql
-        _sql = "CREATE SCHEMA %s" % _name
+        _sql = "CREATE SCHEMA \"%s\"" % _name
         if _authorization is not None:
             _sql = "%s AUTHORIZATION %s" % (_sql, _authorization)
 
@@ -960,7 +1237,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         生成删除数据库的sql语句数组
         """
         _name = args[0]  # 数据库名
-        _sql = "DROP SCHEMA %s CASCADE" % _name
+        _sql = 'DROP SCHEMA "%s" CASCADE' % _name
 
         return ([_sql], None, {})
 
@@ -980,19 +1257,42 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _index_tablespace = kwargs.get('index_tablespace', None)  # 指定索引所在的表空间
 
         _sqls = []
+        _checks = []  # 语句检查数组
 
         # 生成表字段清单
         _cols = []
         if kwargs.get('fixed_col_define', None) is not None:
             for _col_name, _col_def in kwargs['fixed_col_define'].items():
                 _cols.append(
-                    '%s %s' % (_col_name, self._dbtype_mapping(_col_def['type'], _col_def.get('len', None)))
+                    '"%s" %s%s%s' % (
+                        _col_name, self._dbtype_mapping(_col_def['type'], _col_def.get('len', None)),
+                        '' if _col_def.get('nullable', True) else ' not null',
+                        '' if _col_def.get('default', None) is None else ' default %s' % self._get_col_default_value(
+                            _col_def['default'], _col_def['type']
+                        )
+                    )
                 )
 
+        # 主键清单(如果存在分区的情况, 分区字段必须为主键)
+        _primary_keys = ['_id']
+
+        # 生成分区sql
+        _partition_sql = None
+        _add_partition_sqls = []
+        _partition_cols = []
+        if kwargs.get('partition', None) is not None:
+            _partition_sql = self._get_partition_sql(
+                self._db_name, _collection,
+                kwargs['partition'], add_partition_sqls=_add_partition_sqls,
+                partition_cols=_partition_cols
+            )
+            _primary_keys.extend(_partition_cols)
+
         # 建表脚本, 需要带上数据库前缀
-        _sql = 'create%s table if not exists %s.%s(_id varchar(100) PRIMARY KEY, %s nosql_driver_extend_tags JSONB)' % (
+        _sql = 'create%s table if not exists "%s"."%s"("_id" varchar(100), %s "nosql_driver_extend_tags" JSONB)%s' % (
             'TEMPORARY' if _temporary else '',
             self._db_name, _collection, (', '.join(_cols) + ',') if len(_cols) > 0 else '',
+            '' if _partition_sql is None else ' %s' % _partition_sql  # 分区信息
         )
 
         # 额外参数
@@ -1004,15 +1304,68 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             _sql = '%s TABLESPACE %s' % (_sql, _tablespace)
 
         _sqls.append(_sql)
+        _checks.append(None)
+        _sqls.extend(_add_partition_sqls)  # 增加分区创建的脚本
+        for _index in range(len(_add_partition_sqls)):
+            _checks.append(None)
+
+        # 处理主键约束
+        _sql = 'alter table "{db_name}"."{collection}" add constraint "pk_{db_name}_{collection}" primary key("{key_str}")'.format(
+            db_name=self._db_name, collection=_collection,
+            key_str='","'.join(_primary_keys)
+        )
+        _sqls.append(_sql)
+        if self._ignore_index_error:
+            _checks.append({'after_check': {'ignore_current_error': True}})  # 忽略语句执行失败
+        else:
+            _checks.append(None)
+
+        # 如果_id不是唯一主键, 需要设置为唯一索引
+        if len(_primary_keys) > 1:
+            _sql = 'create {unique}index "idx_{db_name}_{collection}__id" on "{db_name}"."{collection}"("_id")'.format(
+                unique='UNIQUE ' if '_id' in _partition_cols else '',
+                db_name=self._db_name, collection=_collection
+            )
+            _sqls.append(_sql)
+            if self._ignore_index_error:
+                _checks.append({'after_check': {'ignore_current_error': True}})  # 忽略语句执行失败
+            else:
+                _checks.append(None)
+
+        # 处理注释
+        if kwargs.get('comment', None) is not None:
+            # 添加表注释
+            _sql = "comment on table \"%s\".\"%s\" is '%s'" % (self._db_name, _collection, self._db_quotes_str(kwargs['comment']))
+            _sqls.append(_sql)
+            _checks.append(None)
+
+        if kwargs.get('fixed_col_define', None) is not None:
+            # 添加字段注释
+            for _col_name, _col_def in kwargs['fixed_col_define'].items():
+                if _col_def.get('comment', None) is not None:
+                    _sql = "comment on column \"%s\".\"%s\".\"%s\" is '%s'" % (
+                        self._db_name, _collection, _col_name, self._db_quotes_str(_col_def['comment'])
+                    )
+                    _sqls.append(_sql)
+                    _checks.append(None)
 
         # 建索引脚本
         if kwargs.get('indexs', None) is not None:
             for _index_name, _index_def in kwargs['indexs'].items():
+                _support_unique = True
                 _cols = []
                 for _col_name, _para in _index_def['keys'].items():
-                    _cols.append('%s' % _col_name)
-                _sql = 'create %sindex%s if not exists %s on %s.%s %s(%s)%s' % (
-                    'UNIQUE ' if _index_def.get('paras', {}).get('unique', False) else '',
+                    if _col_name not in _partition_cols:
+                        # 索引中存在非分区条件的字段, 则不支持唯一索引
+                        _support_unique = False
+
+                    if _para.get('asc', 1) == -1:
+                        # 降序索引
+                        _cols.append('"%s" desc' % _col_name)
+                    else:
+                        _cols.append('"%s"' % _col_name)
+                _sql = 'create %sindex%s if not exists "%s" on "%s"."%s" %s(%s)%s' % (
+                    'UNIQUE ' if _index_def.get('paras', {}).get('unique', False) and _support_unique else '',
                     ' CONCURRENTLY' if _index_concurrently else '',
                     _index_name, self._db_name, _collection,
                     '' if _index_method is None else 'USING %s ' % _index_method,
@@ -1020,9 +1373,13 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                     '' if _index_tablespace is None else ' TABLESPACE %s' % _index_tablespace
                 )
                 _sqls.append(_sql)
+                if self._ignore_index_error:
+                    _checks.append({'after_check': {'ignore_current_error': True}})  # 忽略语句执行失败
+                else:
+                    _checks.append(None)
 
         # 返回结果
-        return (_sqls, None, {})
+        return (_sqls, None, {}, _checks)
 
     def _sql_fun_list_collections(self, op: str, *args, **kwargs) -> tuple:
         """
@@ -1033,7 +1390,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _sql_paras = []
         _where = self._get_filter_sql(_filter, sql_paras=_sql_paras)
         if _where is not None:
-            _where = _where.replace('name ', 'tablename ', 1)
+            _where = _where.replace('"name" ', 'tablename ', 1)
 
         _sql = "select tablename as name from pg_tables where schemaname = '%s'%s order by tablename" % (
             self._db_name, '' if _where is None else ' and %s' % _where
@@ -1047,7 +1404,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         生成删除表的sql语句数组
         """
         _collection = args[0]
-        _sql = "DROP TABLE IF EXISTS %s.%s CASCADE" % (self._db_name, _collection)
+        _sql = 'DROP TABLE IF EXISTS "%s"."%s" CASCADE' % (self._db_name, _collection)
         return ([_sql], None, {})
 
     def _sql_fun_turncate_collection(self, op: str, *args, **kwargs) -> tuple:
@@ -1057,7 +1414,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _collection = args[0]
         _sqls = []
         _sqls.append(
-            "TRUNCATE TABLE %s.%s" % (self._db_name, _collection)
+            'TRUNCATE TABLE "%s"."%s"' % (self._db_name, _collection)
         )
 
         return (_sqls, None, {})
@@ -1071,20 +1428,20 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _fixed_col_define = args[2] if len(args) > 2 else kwargs.get('fixed_col_define', {})
 
         # 生成插入字段和值
-        _cols = ['_id']
+        _cols = ['"_id"']
         _sql_paras = [_row.pop('_id')]
         for _col in _fixed_col_define.get('cols', []):
             _val = _row.pop(_col, None)
             if _val is not None:
-                _cols.append('%s' % _col)
+                _cols.append('"%s"' % _col)
                 _sql_paras.append(self._python_to_dbtype(_val)[1])
 
         # 剩余的内容放入扩展字段
-        _cols.append('nosql_driver_extend_tags')
-        _sql_paras.append(self._python_to_dbtype(_row)[1])
+        _cols.append('"nosql_driver_extend_tags"')
+        _sql_paras.append(self._python_to_dbtype(_row, dbtype='json')[1])
 
         # 组成sql
-        _sql = 'insert into %s.%s(%s) values(%s)' % (
+        _sql = 'insert into "%s"."%s"(%s) values(%s)' % (
             self._db_name, _collection, ','.join(_cols), ','.join(['%s' for _tcol in _cols])
         )
 
@@ -1099,14 +1456,14 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _fixed_col_define = args[2] if len(args) > 2 else kwargs.get('fixed_col_define', {})
 
         # 生成插入字段列表
-        _cols = ['_id']
+        _cols = ['"_id"']
         for _col in _fixed_col_define.get('cols', []):
             if _col == '_id':
                 continue
 
-            _cols.append('%s' % _col)
+            _cols.append('"%s"' % _col)
 
-        _cols.append('nosql_driver_extend_tags')
+        _cols.append('"nosql_driver_extend_tags"')
 
         # 遍历生成插入数据和参数
         _para_array = []
@@ -1128,14 +1485,14 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
 
             # 剩余的内容放入扩展字段
             _col_values.append('%s')
-            _sql_paras.append(self._python_to_dbtype(_row)[1])
+            _sql_paras.append(self._python_to_dbtype(_row, dbtype='json')[1])
 
             # 添加到数组
             _para_array.extend(_sql_paras)
             _value_array.append('(%s)' % ','.join(_col_values))
 
         # 组成sql
-        _sql = 'insert into %s.%s(%s) values %s' % (
+        _sql = 'insert into "%s"."%s"(%s) values %s' % (
             self._db_name, _collection, ','.join(_cols), ','.join(_value_array)
         )
 
@@ -1150,6 +1507,9 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _filter = args[1]
         _update = args[2]
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if _partition is not None:
+            _collection = '%s_%s' % (_collection, _partition)
 
         # 处理where条件语句
         _where_sql_paras = []
@@ -1163,7 +1523,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             _update, fixed_col_define=_fixed_col_define, sql_paras=_update_sql_paras
         )
 
-        _sql_collection = '%s.%s' % (self._db_name, _collection)
+        _sql_collection = '"%s"."%s"' % (self._db_name, _collection)
         _sql = 'update %s set %s' % (_sql_collection, _update_sql)
         if _where_sql is not None:
             _sql = '%s where %s' % (_sql, _where_sql)
@@ -1180,6 +1540,9 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _collection = args[0]
         _filter = args[1]
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if _partition is not None:
+            _collection = '%s_%s' % (_collection, _partition)
 
         # 处理where条件语句
         _where_sql_paras = []
@@ -1188,7 +1551,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         )
 
         _sql_paras = None
-        _sql_collection = '%s.%s' % (self._db_name, _collection)
+        _sql_collection = '"%s"."%s"' % (self._db_name, _collection)
         _sql = 'delete from %s' % _sql_collection
         if _where_sql is not None:
             _sql = '%s where %s' % (_sql, _where_sql)
@@ -1209,6 +1572,9 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _skip = kwargs.get('skip', None)
         _limit = kwargs.get('limit', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if _partition is not None:
+            _collection = '%s_%s' % (_collection, _partition)
 
         # 处理where条件语句
         _where_sql_paras = []
@@ -1231,7 +1597,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         )
 
         # 查询表
-        _tab = '%s.%s' % (self._db_name, _collection)
+        _tab = '"%s"."%s"' % (self._db_name, _collection)
 
         # 组装语句
         _sql_paras = []
@@ -1269,6 +1635,9 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _skip = kwargs.get('skip', None)
         _limit = kwargs.get('limit', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if _partition is not None:
+            _collection = '%s_%s' % (_collection, _partition)
 
         # 处理where条件语句
         _where_sql_paras = []
@@ -1277,7 +1646,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         )
 
         # 查询表名
-        _tab = '%s.%s' % (self._db_name, _collection)
+        _tab = '"%s"."%s"' % (self._db_name, _collection)
 
         # 组装语句
         if _limit is not None or _skip is not None:
@@ -1322,6 +1691,9 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _projection = kwargs.get('projection', None)
         _sort = kwargs.get('sort', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if _partition is not None:
+            _collection = '%s_%s' % (_collection, _partition)
 
         # 处理group by语句
         _select_sql_paras = []
@@ -1336,7 +1708,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         )
 
         # 查询表名
-        _tab = '%s.%s' % (self._db_name, _collection)
+        _tab = '"%s"."%s"' % (self._db_name, _collection)
 
         # 组装查询语句
         _sql_paras = []

@@ -112,6 +112,7 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
                 {
                     '数据库名': {
                         'index_only': False,  # 是否仅用于索引, 不创建
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -121,14 +122,21 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
                     '数据库名': {
                         '集合名': {
                             'index_only': False,  # 是否仅用于索引, 不创建
-                            'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
+                            'comment': '',  # 集合注释
+                            'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}, 'partition': {表分区定义}
                         }
                         ...
                     },
                     ...
                 }
+            init_yaml_file {str} - 要在启动时创建的数据库和集合(表)配置yaml文件
+                注1: 该参数用于将init_db和init_collections参数内容放置的配置文件中, 如果参数有值则忽略前面两个参数
+                注2: 配置文件为init_db和init_collections两个字典, 内容与这两个参数一致
             logger {Logger} - 传入驱动的日志对象
+            ignore_index_error {bool} - 是否忽略索引创建的异常, 默认为True
+            debug {bool} - 指定是否debug模式, 默认为False
             close_action {str} - 关闭连接时自动处理动作, None-不处理, 'commit'-自动提交, 'rollback'-自动回滚
+            support_desc_index {bool} - 是否支持降序索引, 默认为False, MySQL8.0后的版本支持
         """
         super().__init__(
             connect_config=connect_config, pool_config=pool_config, driver_config=driver_config
@@ -141,7 +149,7 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
     # 特殊的重载函数
     #############################
 
-    async def list_dbs(self) -> list:
+    async def list_dbs(self, *args, **kwargs) -> list:
         """
         列出数据库清单
 
@@ -155,6 +163,89 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         )
         # 需要将字典形式的列表转换为数据库名列表, 查询结果无法转换为标准的name, 需要特殊实现
         return [_db['Database'] for _db in _ret]
+
+    async def create_collection(self, collection: str, indexs: dict = None, fixed_col_define: dict = None,
+            comment: str = None, **kwargs):
+        """
+        创建集合(相当于关系型数据库的表, 如果不存在则创建)
+        注意: 所有集合都有必须有 '_id' 这个记录的唯一主键字段
+
+        @param {str} collection - 集合名(表名)
+        @param {dict} indexs=None - 要创建的索引字典, 格式为:
+            {
+                '索引名': {
+                    --索引的字段清单
+                    'keys': {
+                        '字段名': { 'asc': 是否升序(1为升序, -1为降序) },
+                        ...
+                    }
+                    --创建参数
+                    'paras': {
+                        'unique': 是否唯一索引(True/False),
+                        ...驱动实现类自定义支持的参数
+                    }
+                },
+            }
+        @param {dict} fixed_col_define=None - 固定字段定义(只有固定字段才能进行索引), 格式如下:
+            {
+                '字段名': {
+                    'type': '字段类型(str, int, float, bool, json)',
+                    'len': 字段长度,
+                    'nullable': True,  # 是否可空
+                    'default': 默认值,
+                    'comment': '字段注释'
+                },
+                ...
+            }
+        @param {str} comment=None - 集合注释
+        @param {kwargs} - 实现驱动自定义支持的参数
+            partition {dict} - 表分区设置, 仅支持固定字段的str, int, bool类型
+                type : str, 指定创建分区的类型，可支持的分区类型如下：
+                    range - int类型的范围分区, 分区字段必须为int类型, 或者可支持通过表达式转换为int结果的字段(同步需配置转换表达式);
+                        对应的比较值需设置为int类型的值, 或者以字符串形式的函数表达式, 但函数表达式的结果必须为int类型, 例如"to_days('2021-10-11')"
+                        注1: range类型分区字段仅支持设置单个字段
+                        注2: 每个分区的范围设置只有一个比较值, 实际符合分区的取值范围为"上一分区比较值 <= 字段值 < 当前分区比较值"
+                    range_columns - 多列范围分区, 与range类似, 但分区字段类型可支持各种类型, 不支持函数表达式; 对应的比较值需设置为与字段类型相同的值或函数表达式
+                        注1: range_columns可以支持同时设置多个分区字段
+                        注2: 当设置为多个分区字段时, 符合分区的取值范围为数组比较, 例如字段值(c1, c2)与范围值(v1, v2)的比较表达式为: (c1 < v1 or (c1 == v1 and c2 < v2))
+                    list - int类型的列表分区, 分区字段必须为int类型, 或者可支持通过表达式转换为int结果的字段(同步需配置转换表达式);
+                        对应的比较值需设置为数组, 且数组内的值必须为int类型, 或以字符串形式的函数表达式, 但函数表达式的结果必须为int类型
+                        注1: 分区字段仅支持设置单个字段
+                        注2: 符合分区的取值范围为在数组中能找到的字段值, 如果所有分区都无法匹配, 数据将无法正常插入数据库
+                    list_columns - 全类型列表分区, 与list类似, 但分区字段类型可支持各种类型, 不支持函数表达式
+                    hash - 哈希分区, 可以字段的哈希值均匀分布记录, 分区字段必须为int类型, 或者可支持通过表达式转换为int结果的字段(同步需配置转换表达式)
+                        注1: 分区字段仅支持设置单个字段
+                        注2: hash类型分区不支持分区范围的设置, 而是通过count参数指定要拆分的分区数量
+                    linear_hash - 线性哈希分区, 与hash分区类似, 算法处理更快, 缺点是数据分布不够均匀
+                    key - key分区, 与哈希分区类似, 区别是可以支持各种数据类型, 此外可以支持设置多个分区字段
+                    linear_key - 线性key分区, 与key分区类似, 算法处理更快, 缺点是数据分布不够均匀
+                count: int, 拆分的分区数量, 仅对hash, linear_hash, key, linear_key的分区类型有效
+                columns : list, 分区字段设置, 列表每个值为对应的一个分区字段设置字典, 定义如下:
+                    col_name : str, 分区字段名
+                    func : str, 转换函数表达式, 可通过{col_name}进行字段名的替换, 例如to_days({col_name})
+                    range_list : list, 分区条件列表, 设置每个分区名和分区条件比较值, 仅range, range_columns, list, list_columns使用
+                        name : str, 分区名, 不设置或设置为None代表自动生成分区名, 如果不是第一个分区字段无需设置(统一使用第一个分区字段的对应分区名)
+                        value : any, 分区条件比较值, 按不同分区类型应设置为不同的值
+                            注1: 如果为range或range_columns, 该值设置为单一比较常量值, 例如 3, "'test'", "to_days('2021-10-11')", None(代表最大值MAXVALUE)
+                            注2: 如果为list或list_columns, 该值应设置为list, 例如 [3, "'test'", 5, "to_days('2021-01-01')", None], None代表NULL
+                            注3: 如果值为字符串, 应使用单引号进行包裹, 例如"'str_value'"
+                sub_partition: dict, 子分区设置
+                    type : str, 子分区类型, hash-哈希子分区, key-key类型子分区
+                    columns: list, 分区字段设置, 列表每个值为对应的一个分区字段设置字典, 定义如下(注意hash子分区仅支持1个分区字段, key子分区可以支持多个分区字段):
+                        col_name : str, 分区字段名
+                        func : str, 转换函数表达式, 可通过{col_name}进行字段名的替换, 例如to_days({col_name})
+                    count : int, 要划分的子分区数
+                    sub_name : list[list], 指定子分区名, 一维数组长度与父分区数量一致, 二位数组长度与count一致
+                        例如: [['sub_name1', 'sub_name2'], ['sub_name3', 'sub_name4'], ['sub_name5', 'sub_name6']]
+                注: 使用表分区的限制:
+                    1. 如果 _id 没有作为分区条件, 则仅创建普通索引而非唯一索引, _id 的唯一性数据库层面不控制, 需要由应用自行控制
+                    2. 要创建唯一索引的字段必须作为分区条件之一, 否则将会作为普通索引而非唯一索引来创建
+        """
+        # 只是单纯解决注释问题
+        await super().create_collection(
+            collection, indexs=indexs, fixed_col_define=fixed_col_define, comment=comment,
+            **kwargs
+        )
 
     #############################
     # 需要继承类实现的内部函数
@@ -187,6 +278,7 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
                 {
                     '数据库名': {
                         'index_only': False,  # 是否仅用于索引, 不创建
+                        'comment': '',  # 数据库注释
                         'args': [], # 创建数据库的args参数
                         'kwargs': {}  #创建数据库的kwargs参数
                     }
@@ -196,6 +288,7 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
                     '数据库名': {
                         '集合名': {
                             'index_only': False,  # 是否仅用于索引, 不创建
+                            'comment': '',  # 集合注释
                             'indexs': {索引字典}, 'fixed_col_define': {固定字段定义}
                         }
                         ...
@@ -203,6 +296,7 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
                     ...
                 }
             logger {Logger} - 传入驱动的日志对象
+            debug {bool} - 指定是否debug模式, 默认为False
             close_action {str} - 关闭连接时自动处理动作, None-不处理, 'commit'-自动提交, 'rollback'-自动回滚
         @returns {dict} - 返回连接池的相关参数
             {
@@ -435,17 +529,18 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
 
         # 进行转换处理
         _dbvalue = None
-        if _dbtype == 'bool':
-            if is_json:
-                _dbvalue = 'true' if val else 'false'
+        if val is not None:
+            if _dbtype == 'bool':
+                if is_json:
+                    _dbvalue = 'true' if val else 'false'
+                else:
+                    _dbvalue = 1 if val else 0
+            elif _dbtype in ('int', 'float'):
+                _dbvalue = val
+            elif _dbtype == 'json':
+                _dbvalue = json.dumps(val, ensure_ascii=False)
             else:
-                _dbvalue = 1 if val else 0
-        elif _dbtype in ('int', 'float'):
-            _dbvalue = val
-        elif _dbtype == 'json':
-            _dbvalue = json.dumps(val, ensure_ascii=False)
-        else:
-            _dbvalue = str(val)
+                _dbvalue = str(val)
 
         # 返回结果
         return (_dbtype, _dbvalue)
@@ -508,23 +603,26 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
                 if _op in self._filter_symbol_mapping.keys():
                     # 比较值转换为数据库的格式
                     _dbtype, _cmp_val = self._python_to_dbtype(_para)
-                    _cds.append('%s %s %s' % (_key, self._filter_symbol_mapping[_op], '%s'))
+                    _cds.append('%s %s %s' % (_key if _is_json else '`%s`' % _key, self._filter_symbol_mapping[_op], '%s'))
                     sql_paras.append(_cmp_val)
                 elif _op == '$regex':
                     if _is_json:
                         # json查出来的字段默认带双引号, 因此需要去掉双引号才能进行正则比对
-                        _cds.append("trim(both '\"' from %s) REGEXP %s" % (_key, '%s'))
+                        _cds.append("trim(both '\"' from %s) REGEXP %s" % (_key if _is_json else '`%s`' % _key, '%s'))
                     else:
-                        _cds.append("%s REGEXP %s" % (_key, '%s'))
+                        _cds.append("%s REGEXP %s" % (_key if _is_json else '`%s`' % _key, '%s'))
                     sql_paras.append(_para)
                 else:
                     raise aiomysql.NotSupportedError('aiomysql not support this search operation [%s]' % _op)
             _sql = ' and '.join(_cds)
         else:
             # 直接相等的条件
-            _dbtype, _cmp_val = self._python_to_dbtype(val)
-            _sql = '%s = %s' % (_key, '%s')
-            sql_paras.append(_cmp_val)
+            if val is None:
+                _sql = '%s is NULL' % (_key if _is_json else '`%s`' % _key)
+            else:
+                _dbtype, _cmp_val = self._python_to_dbtype(val)
+                _sql = '%s = %s' % (_key if _is_json else '`%s`' % _key, '%s')
+                sql_paras.append(_cmp_val)
 
         return _sql
 
@@ -856,6 +954,197 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
 
         return ','.join(_select), ','.join(_groupby)
 
+    def _get_col_default_value(self, val: str, dbtype: str) -> str:
+        """
+        获取字段的默认值
+
+        @param {str} val - 字符串形式的值
+        @param {str} dbtype - 数据类型
+
+        @returns {str} - 返回默认值的字符串
+        """
+        if dbtype in ('int', 'float'):
+            return str(val)
+        elif dbtype == 'bool':
+            return '1' if str(val).lower() == 'true' else '0'
+        elif dbtype == 'json':
+            if type(val) != str:
+                return "'%s'" % self._db_quotes_str(json.dumps(val, ensure_ascii=False))
+            else:
+                return "'%s'" % self._db_quotes_str(val)
+        else:
+            return "'%s'" % self._db_quotes_str(str(val))
+
+    def _get_partition_sql(self, partition: dict) -> str:
+        """
+        生成分区创建sql
+
+        @param {dict} partition - 分区创建配置字典
+
+        @returns {str} - 分区创建sql
+        """
+        # 复制参数对象
+        _partition = copy.deepcopy(partition)
+
+        # 组装sql需要用到的sql关键字字典
+        _type_sql_mapping = {
+            'range': {
+                'name_sql': 'RANGE', 'value_sql': 'VALUES LESS THAN',
+                'support_func': True, 'support_range': True, 'is_columns': False
+            },
+            'range_columns': {
+                'name_sql': 'RANGE COLUMNS', 'value_sql': 'VALUES LESS THAN',
+                'support_func': False, 'support_range': True, 'is_columns': True
+            },
+            'list': {
+                'name_sql': 'LIST', 'value_sql': 'VALUES IN',
+                'support_func': True, 'support_range': True, 'is_columns': False
+            },
+            'list_columns': {
+                'name_sql': 'LIST COLUMNS', 'value_sql': 'VALUES IN',
+                'support_func': False, 'support_range': True, 'is_columns': False
+            },
+            'hash': {
+                'name_sql': 'HASH',
+                'support_func': True, 'support_range': False, 'is_columns': False
+            },
+            'linear_hash': {
+                'name_sql': 'LINEAR HASH',
+                'support_func': True, 'support_range': False, 'is_columns': False
+            },
+            'key': {
+                'name_sql': 'KEY',
+                'support_func': False, 'support_range': False, 'is_columns': True
+            },
+            'linear_key': {
+                'name_sql': 'LINEAR KEY',
+                'support_func': False, 'support_range': False, 'is_columns': True
+            }
+        }
+
+        _type_sql_para = _type_sql_mapping[_partition['type']]
+
+        # 非多列模式的分区条件清单只取第一个参数
+        if _type_sql_para['is_columns']:
+            _columns = _partition['columns']
+        else:
+            # 只支持单字段
+            _columns = _partition['columns'][0: 1]
+
+        _cols = []  # 分区字段清单
+        _partition_configs = []  # 分区定义清单
+        for _index in range(len(_columns)):
+            _column = _columns[_index]
+
+            # 分区字段清单处理
+            if not _type_sql_para['support_func'] or _column.get('func', '') == '':
+                # 不支持函数的情况
+                _cols.append('`%s`' % _column['col_name'])
+            else:
+                _cols.append(_column['func'].format(col_name='`%s`' % _column['col_name']))
+
+            if not _type_sql_para['support_range']:
+                # 不支持分区条件的情况, 跳过分区清单
+                continue
+
+            for _range_index in range(len(_column['range_list'])):
+                _range = _column['range_list'][_range_index]
+                if _index == 0:
+                    # 第一个字段
+                    _partition_name = ('p%d' % _range_index) if _range.get('name', None) is None else _range['name']
+                    _partition_configs.append({
+                        'name': _partition_name, 'values': [_range['value']]
+                    })
+                else:
+                    # 非第一个字段, 添加到对应分区的values数组即可
+                    _partition_configs[_range_index]['values'].append(_range['value'])
+
+        # 组装sql
+        if not _type_sql_para['support_range']:
+            # 不支持分区条件清单, 直接按分区数量处理
+            _partition_sql = 'PARTITION BY %s (%s) PARTITIONS %d' % (
+                _type_sql_para['name_sql'], ','.join(_cols), _partition['count']
+            )
+            return _partition_sql
+
+        # 支持分区条件清单的情况
+        _partition_sql = 'PARTITION BY %s (%s)' % (_type_sql_para['name_sql'], ','.join(_cols))
+        _partition_value_sqls = []  # 分区值sql数组
+        for _partition_config in _partition_configs:
+            # 处理值清单, 将其修改为对应的sql字符串
+            if _partition['type'] in ('list', 'list_columns'):
+                # 列表形式, 只需处理第一个值
+                _deal_value = _partition_config['values'][0]
+                for _index in range(len(_deal_value)):
+                    _val = _deal_value[_index]
+                    if _val is None:
+                        _deal_value[_index] = 'MAXVALUE' if _partition['type'] == 'list' else 'NULL'
+                    else:
+                        _deal_value[_index] = str(_val)
+
+                _partition_config['values'] = ','.join(_deal_value)
+            else:
+                # 值形式, 需要每个值处理
+                for _index in range(len(_partition_config['values'])):
+                    _deal_value = _partition_config['values'][_index]
+                    if _deal_value is None:
+                        _partition_config['values'][_index] = 'MAXVALUE'
+                    else:
+                        _partition_config['values'][_index] = str(_deal_value)
+
+                _partition_config['values'] = ','.join(_partition_config['values'])
+
+            _sql = 'PARTITION `%s` %s (%s)' % (
+                _partition_config['name'], _type_sql_para['value_sql'], _partition_config['values']
+            )
+            _partition_value_sqls.append(_sql)
+
+        # 判断是否有子分区
+        if _partition.get('sub_partition', None) is None:
+            # 没有子分区, 直接组织并返回
+            _partition_sql = '%s (%s)' % (
+                _partition_sql, ', '.join(_partition_value_sqls)
+            )
+            return _partition_sql
+
+        # 子分区处理
+        _cols = []  # 字段处理清单
+        if _partition['sub_partition']['type'] == 'hash':
+            _columns = _partition['sub_partition']['columns'][0: 1]
+        else:
+            _columns = _partition['sub_partition']['columns']
+
+        for _column in _columns:
+            if _partition['sub_partition']['type'] == 'key' or _column.get('func', '') == '':
+                _cols.append('`%s`' % _column['col_name'])
+            else:
+                _cols.append(_column['func'].format(col_name='`%s`' % _column['col_name']))
+
+        _partition_sql = '%s SUBPARTITION BY %s (%s)' % (
+            _partition_sql, _partition['sub_partition']['type'].upper(), ','.join(_cols)
+        )
+
+        if _partition['sub_partition'].get('sub_name', None) is None:
+            # 子分区无需定义名字
+            _partition_sql = '%s SUBPARTITIONS %d (%s)' % (
+                _partition_sql, _partition['sub_partition']['count'], ', '.join(_partition_value_sqls)
+            )
+        else:
+            # 处理子分区的名字
+            _sub_name = _partition['sub_partition']['sub_name']
+            for _index in range(len(_partition_value_sqls)):
+                for _sub_index in range(len(_sub_name[_index])):
+                    _sub_name[_index][_sub_index] = 'SUBPARTITION %s' % _sub_name[_index][_sub_index]
+
+                _partition_value_sqls[_index] = '%s (%s)' % (
+                    _partition_value_sqls[_index], ', '.join(_sub_name[_index])
+                )
+
+            # 组合
+            _partition_sql = '%s (%s)' % (_partition_sql, ', '.join(_partition_value_sqls))
+
+        return _partition_sql
+
     #############################
     # 生成SQL转换的处理函数
     #############################
@@ -913,28 +1202,84 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         if kwargs.get('fixed_col_define', None) is not None:
             for _col_name, _col_def in kwargs['fixed_col_define'].items():
                 _cols.append(
-                    '`%s` %s' % (_col_name, self._dbtype_mapping(_col_def['type'], _col_def.get('len', None)))
+                    '`%s` %s%s%s%s' % (
+                        _col_name, self._dbtype_mapping(_col_def['type'], _col_def.get('len', None)),
+                        '' if _col_def.get('nullable', True) else ' not null',
+                        '' if _col_def.get('default', None) is None or _col_def['type'] == 'json' else ' default %s' % self._get_col_default_value(
+                            _col_def['default'], _col_def['type']
+                        ),
+                        '' if _col_def.get('comment', None) is None else " comment '%s'" % self._db_quotes_str(_col_def['comment'])
+                    )
                 )
 
+        # 主键清单(如果存在分区的情况, 分区字段必须为主键)
+        _primary_keys = ['`_id`']
+
+        # 生成分区sql
+        _partition_sql = None
+        _partition_cols = []  # 放入分区条件的字段列表
+        if kwargs.get('partition', None) is not None:
+            _partition_sql = self._get_partition_sql(kwargs['partition'])
+            # 分区字段要添加为主键
+            for _column in kwargs['partition']['columns']:
+                _partition_cols.append(_column['col_name'])
+
+            for _column in kwargs['partition'].get('sub_partition', {}).get('columns', []):
+                _partition_cols.append(_column['col_name'])
+
+            for _col in _partition_cols:
+                _col_name = '`%s`' % _col
+                if _col_name not in _primary_keys:
+                    _primary_keys.append(_col_name)
+
         # 建表脚本, 需要带上数据库前缀
-        _sql = 'create table if not exists %s`%s`(`_id` varchar(100) primary key, %s `nosql_driver_extend_tags` json)' % (
+        _sql = 'create table if not exists %s`%s`(`_id` varchar(100), %s `nosql_driver_extend_tags` json, %s)%s%s' % (
             _db_prefix, _collection, (', '.join(_cols) + ',') if len(_cols) > 0 else '',
+            'primary key(%s)' % ','.join(_primary_keys),  # 设置主键
+            '' if kwargs.get('comment', None) is None else " comment='%s'" % self._db_quotes_str(kwargs['comment']),  # 表注释
+            '' if _partition_sql is None else _partition_sql  # 分区语句
         )
         _sqls.append(_sql)
         _checks.append(None)
 
+        # 如果_id不是唯一主键, 需要设置为唯一索引
+        if len(_primary_keys) > 1:
+            _sql = 'create %sindex `idx_%s_%s__id` on %s`%s`(`_id`)' % (
+                'UNIQUE ' if '_id' in _partition_cols else '',
+                self._db_name, _collection, _db_prefix, _collection
+            )
+            _sqls.append(_sql)
+            if self._ignore_index_error:
+                _checks.append({'after_check': {'ignore_current_error': True}})  # 忽略语句执行失败
+            else:
+                _checks.append(None)
+
         # 建索引脚本
+        _support_desc_index = self._driver_config.get('support_desc_index', False)
         if kwargs.get('indexs', None) is not None:
             for _index_name, _index_def in kwargs['indexs'].items():
+                _support_unique = True
                 _cols = []
                 for _col_name, _para in _index_def['keys'].items():
-                    _cols.append('`%s`' % _col_name)
+                    if _col_name not in _partition_cols:
+                        # 索引中存在非分区条件的字段, 则不支持唯一索引
+                        _support_unique = False
+
+                    if _support_desc_index and _para.get('asc', 1) == -1:
+                        # 降序索引
+                        _cols.append('`%s` desc' % _col_name)
+                    else:
+                        _cols.append('`%s`' % _col_name)
+
                 _sql = 'create %sindex `%s` on %s`%s`(%s)' % (
-                    'UNIQUE ' if _index_def.get('paras', {}).get('unique', False) else '',
+                    'UNIQUE ' if _index_def.get('paras', {}).get('unique', False) and _support_unique else '',
                     _index_name, _db_prefix, _collection, ','.join(_cols)
                 )
                 _sqls.append(_sql)
-                _checks.append({'after_check': {'ignore_current_error': True}})  # 忽略语句执行失败
+                if self._ignore_index_error:
+                    _checks.append({'after_check': {'ignore_current_error': True}})  # 忽略语句执行失败
+                else:
+                    _checks.append(None)
 
         # 返回结果
         return (_sqls, None, {}, _checks)
@@ -996,7 +1341,7 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
 
         # 剩余的内容放入扩展字段
         _cols.append('`nosql_driver_extend_tags`')
-        _sql_paras.append(self._python_to_dbtype(_row)[1])
+        _sql_paras.append(self._python_to_dbtype(_row, dbtype='json')[1])
 
         # 组成sql
         _sql = 'insert into %s(%s) values(%s)' % (
@@ -1043,7 +1388,7 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
 
             # 剩余的内容放入扩展字段
             _col_values.append('%s')
-            _sql_paras.append(self._python_to_dbtype(_row)[1])
+            _sql_paras.append(self._python_to_dbtype(_row, dbtype='json')[1])
 
             # 添加到数组
             _para_array.extend(_sql_paras)
@@ -1065,6 +1410,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         _filter = args[1]
         _update = args[2]
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if type(_partition) == str:
+            _partition = [_partition]
 
         # 处理where条件语句
         _where_sql_paras = []
@@ -1078,7 +1426,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
             _update, fixed_col_define=_fixed_col_define, sql_paras=_update_sql_paras
         )
 
-        _sql_collection = '`%s`.`%s`' % (self._db_name, _collection)
+        _sql_collection = '`%s`.`%s`%s' % (
+            self._db_name, _collection, '' if _partition is None else ' partition(`%s`)' % '`.`'.join(_partition)
+        )
         _sql = 'update %s set %s' % (_sql_collection, _update_sql)
         if _where_sql is not None:
             _sql = '%s where %s' % (_sql, _where_sql)
@@ -1095,6 +1445,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         _collection = args[0]
         _filter = args[1]
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if type(_partition) == str:
+            _partition = [_partition]
 
         # 处理where条件语句
         _where_sql_paras = []
@@ -1103,7 +1456,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         )
 
         _sql_paras = None
-        _sql_collection = '`%s`.`%s`' % (self._db_name, _collection)
+        _sql_collection = '`%s`.`%s`%s' % (
+            self._db_name, _collection, '' if _partition is None else ' partition(`%s`)' % '`.`'.join(_partition)
+        )
         _sql = 'delete from %s' % _sql_collection
         if _where_sql is not None:
             _sql = '%s where %s' % (_sql, _where_sql)
@@ -1124,6 +1479,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         _skip = kwargs.get('skip', None)
         _limit = kwargs.get('limit', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if type(_partition) == str:
+            _partition = [_partition]
 
         # 处理where条件语句
         _where_sql_paras = []
@@ -1146,7 +1504,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         )
 
         # 查询表
-        _tab = '`%s`.`%s`' % (self._db_name, _collection)
+        _tab = '`%s`.`%s`%s' % (
+            self._db_name, _collection, '' if _partition is None else ' partition(`%s`)' % '`.`'.join(_partition)
+        )
 
         # 组装语句
         _sql_paras = []
@@ -1184,6 +1544,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         _skip = kwargs.get('skip', None)
         _limit = kwargs.get('limit', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if type(_partition) == str:
+            _partition = [_partition]
 
         # 处理where条件语句
         _where_sql_paras = []
@@ -1192,7 +1555,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         )
 
         # 查询表名
-        _tab = '`%s`.`%s`' % (self._db_name, _collection)
+        _tab = '`%s`.`%s`%s' % (
+            self._db_name, _collection, '' if _partition is None else ' partition(`%s`)' % '`.`'.join(_partition)
+        )
 
         # 组装语句
         if _limit is not None or _skip is not None:
@@ -1237,6 +1602,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         _projection = kwargs.get('projection', None)
         _sort = kwargs.get('sort', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _partition = kwargs.get('partition', None)  # 指定分区表
+        if type(_partition) == str:
+            _partition = [_partition]
 
         # 处理group by语句
         _select_sql_paras = []
@@ -1251,7 +1619,9 @@ class MySQLNosqlDriver(NosqlAIOPoolDriver):
         )
 
         # 查询表名
-        _tab = '`%s`.`%s`' % (self._db_name, _collection)
+        _tab = '`%s`.`%s`%s' % (
+            self._db_name, _collection, '' if _partition is None else ' partition(`%s`)' % '`.`'.join(_partition)
+        )
 
         # 组装查询语句
         _sql_paras = []

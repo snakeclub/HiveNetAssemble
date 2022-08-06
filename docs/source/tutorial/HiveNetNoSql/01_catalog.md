@@ -216,3 +216,251 @@ NosqlAIOPoolDriver框架类直接提供了对DB-API规范的支持，因此如�
 
 
 
+## MySQL和PostgreSQL的分区表功能支持
+
+mongo自身可以通过集群部署的方式直接支持表数据分区，因此驱动并不包含分区表的支持；而MySQL和PostgreSQL的驱动，在建表和查询相关接口上扩展增加了分区表的支持，不过使用上有以下限制需要注意：
+
+1. MySQL和PostgreSQL的驱动对分区表的支持参数有所差异，因此同样的参数在两个驱动并不一定兼容，使用上需要区分出来；
+2. 非分区表的创建，统一使用 “\_id” 字段作为主键；而由于分区表的限制，会将  “\_id” 字段和其他分区字段共同作为联合主键，也就是  “\_id” 并不是唯一主键；
+3. 如果 “\_id” 字段没有作为分区条件, 则只创建普通索引而非唯一索引, 此时 “\_id“ 字段的唯一性在数据库层面无法控制, 需要由应用自行控制该字段的唯一性；
+4. 要创建唯一索引的字段必须作为分区条件字段之一, 否则将会忽略索引重的唯一索引标识，直接作为普通索引而非唯一索引来创建；
+
+
+
+### MySQL分区表功能使用说明
+
+#### partition参数说明
+
+创建表的create_collection函数支持传入partition参数指定表创建为分区表，该参数的说明如下：
+
+- type : str, 指定创建分区的类型，可支持的分区类型如下：
+
+  - range - int类型的范围分区, 分区字段必须为int类型, 或者可支持通过表达式转换为int结果的字段(同步需配置转换表达式); 对应的比较值需设置为int类型的值, 或者以字符串形式的函数表达式, 但函数表达式的结果必须为int类型, 例如"to_days('2021-10-11')"
+
+    注1: range类型分区字段仅支持设置单个字段
+
+    注2: 每个分区的范围设置只有一个比较值, 实际符合分区的取值范围为"上一分区比较值 <= 字段值 < 当前分区比较值"
+
+  - range_columns - 多列范围分区, 与range类似, 但分区字段类型可支持各种类型, 不支持函数表达式; 对应的比较值需设置为与字段类型相同的值或函数表达式
+
+    注1: range_columns可以支持同时设置多个分区字段
+
+    注2: 当设置为多个分区字段时, 符合分区的取值范围为数组比较, 例如字段值(c1, c2)与范围值(v1, v2)的比较表达式为: (c1 < v1 or (c1 == v1 and c2 < v2))
+
+  - list - int类型的列表分区, 分区字段必须为int类型, 或者可支持通过表达式转换为int结果的字段(同步需配置转换表达式); 对应的比较值需设置为数组, 且数组内的值必须为int类型, 或以字符串形式的函数表达式, 但函数表达式的结果必须为int类型
+
+    注1: 分区字段仅支持设置单个字段
+
+    注2: 符合分区的取值范围为在数组中能找到的字段值, 如果所有分区都无法匹配, 数据将无法正常插入数据库
+
+  - list_columns - 全类型列表分区, 与list类似, 但分区字段类型可支持各种类型, 不支持函数表达式
+
+  - hash - 哈希分区, 可以字段的哈希值均匀分布记录, 分区字段必须为int类型, 或者可支持通过表达式转换为int结果的字段(同步需配置转换表达式)
+
+    注1: 分区字段仅支持设置单个字段
+
+    注2: hash类型分区不支持分区范围的设置, 而是通过count参数指定要拆分的分区数量
+
+  - linear_hash - 线性哈希分区, 与hash分区类似, 算法处理更快, 缺点是数据分布不够均匀
+
+  - key - key分区, 与哈希分区类似, 区别是可以支持各种数据类型, 此外可以支持设置多个分区字段
+
+  - linear_key - 线性key分区, 与key分区类似, 算法处理更快, 缺点是数据分布不够均匀
+
+- count: int, 拆分的分区数量, 仅对hash, linear_hash, key, linear_key的分区类型有效
+
+- columns : list, 分区字段设置, 列表每个值为对应的一个分区字段设置字典, 定义如下:
+
+  - col_name : str, 分区字段名
+
+  - func : str, 转换函数表达式, 可通过{col_name}进行字段名的替换, 例如to_days({col_name})
+
+  - range_list : list, 分区条件列表, 设置每个分区名和分区条件比较值, 仅range, range_columns, list, list_columns使用
+
+    - name : str, 分区名, 不设置或设置为None代表自动生成分区名, 如果不是第一个分区字段无需设置(统一使用第一个分区字段的对应分区名)
+
+    - value : any, 分区条件比较值, 按不同分区类型应设置为不同的值
+
+      注1: 如果为range或range_columns, 该值设置为单一比较常量值, 例如 3, "'test'", "to_days('2021-10-11')", None(代表最大值MAXVALUE)
+
+      注2: 如果为list或list_columns, 该值应设置为list, 例如 [3, "'test'", 5, "to_days('2021-01-01')", None], None代表NULL
+
+      注3: 如果值为字符串, 应使用单引号进行包裹, 例如"'str_value'"
+
+- sub_partition: dict, 子分区设置
+
+  - type : str, 子分区类型, hash-哈希子分区, key-key类型子分区
+
+  - columns: list, 分区字段设置, 列表每个值为对应的一个分区字段设置字典, 定义如下(注意hash子分区仅支持1个分区字段, key子分区可以支持多个分区字段):
+
+    - col_name : str, 分区字段名
+    - func : str, 转换函数表达式, 可通过{col_name}进行字段名的替换, 例如to_days({col_name})
+
+  - count : int, 要划分的子分区数
+
+  - sub_name : list[list], 指定子分区名, 一维数组长度与父分区数量一致, 二位数组长度与count一致
+
+    ​	例如: [['sub_name1', 'sub_name2'], ['sub_name3', 'sub_name4'], ['sub_name5', 'sub_name6']]
+
+#### partition参数示例
+
+**1、range和hash组合的两级分区表，形成的分区如下：**
+
+分区p1:  匹配条件 to_days(STR_TO_DATE(col_date_str, ’%Y-%m-%d’)) < 10
+
+​        子分区s1：mod(col_sub_int) == 0
+
+​        子分区s2：mod(col_sub_int) == 1
+
+分区p2：匹配条件 10 <= to_days(STR_TO_DATE(col_date_str, ’%Y-%m-%d’)) < 20
+
+​        子分区s3：mod(col_sub_int) == 0
+
+​        子分区s4：mod(col_sub_int) == 1
+
+分区p3：匹配条件 to_days(STR_TO_DATE(col_date_str, ’%Y-%m-%d’)) >= 20
+
+​        子分区s5：mod(col_sub_int) == 0
+
+​        子分区s6：mod(col_sub_int) == 1
+
+```
+{
+	'type': 'range',
+	'columns': [
+		{
+			'col_name': 'col_date_str',
+			'func': 'to_days(STR_TO_DATE({col_name},’%Y-%m-%d’))',
+			'range_list': [
+				{'name': 'p1', 'value': 10},
+				{'name': 'p2', 'value': 20},
+				{'name': 'p3', 'value': None}
+			]
+		}
+	],
+	'sub_partition': {
+		'type': 'hash',
+		'columns': [{'col_name': 'col_sub_int'}],
+		'count': 2,
+		'sub_name': [['s1', 's2'], ['s3', 's4'], ['s5', 's6']]
+	}
+}
+```
+
+**2、list_columns的列表分区，形成的分区如下：**
+
+分区p1:  匹配条件 col_str in ['test1', 'test2']
+
+分区p2：匹配条件 col_str in ['test3']
+
+分区p3：匹配条件 col_str in ['test4', 'test5', NULL]
+
+```
+{
+	'type': 'list_columns',
+	'columns': [
+		{
+			'col_name': 'col_str',
+			'range_list': [
+				{'name': 'p1', 'value': ["'test1'", "'test2'"]},
+				{'name': 'p2', 'value': ["'test3'"]},
+				{'name': 'p3', 'value': ["'test4'", "'test5'", None]}
+			]
+		}
+	]
+}
+```
+
+**3、key分区，形成的分区如下（分区名为数据库自动生成默认名）：**
+
+分区p1:  匹配条件 mod(hash(col_str)) == 0
+
+分区p2：匹配条件 mod(hash(col_str)) == 1
+
+分区p3：匹配条件 mod(hash(col_str)) == 2
+
+```
+{
+	'type': 'key',
+	'count': 3,
+	'columns': [
+		{
+			'col_name': 'col_str',
+		}
+	]
+}
+```
+
+#### 在操作数据时指定分区
+
+驱动的update、delete、query_list、query_iter、query_count、query_group_by函数均可支持对指定分区进行处理，可在函数调用时传入partition参数指定当次操作涉及的分区表，该参数的特殊说明如下：
+
+1、该参数可以支持传入str或list，如果传入list代表指定多个分区，例如 partition='p1' 或 partition=['p1', 'p2', 'p3']
+
+2、除指定一级分区外，该参数也可以直接传入二级分区，例如 ['p1', 's3']
+
+
+
+### PostgreSQL分区表功能使用说明
+
+#### partition参数说明
+
+创建表的create_collection函数支持传入partition参数指定表创建为分区表，该参数的说明如下：
+
+- type : str, 指定创建分区的类型，可支持的分区类型如下：
+
+  - range - 范围分区, 支持通过表达式对分区字段进行格式转换(同步需配置转换表达式)
+
+    ​	注1: 支持设置多个分区字段
+
+    ​	注2: 每个分区的范围设置只有一个比较值, 实际符合分区的取值范围为"上一分区比较值 <= 字段值 < 当前分区比较值"
+
+    ​	注3: 将自动创建一个默认分区, 当分区字段值无法匹配设置的分区时, 将存入默认分区中
+
+  - list - 列表分区, 支持通过表达式对分区字段进行格式转换(同步需配置转换表达式)
+
+    ​	注1: 分区字段仅支持设置单个字段
+
+    ​	注2: 符合分区的取值范围为在数组中能找到的字段值
+
+    ​	注3: 将自动创建一个默认分区, 当分区字段值无法匹配设置的分区时, 将存入默认分区中
+
+  - hash - 哈希分区
+
+    ​	注1: 支持设置多个分区字段
+
+    ​	注2: hash类型分区不支持分区范围的设置, 而是通过count参数指定要拆分的分区数量
+
+- count: int, 拆分的分区数量, 仅hash的分区类型有效
+
+- columns : list, 分区字段设置, 列表每个值为对应的一个分区字段设置字典, 定义如下:
+
+  - col_name : str, 分区字段名
+
+  - func : str, 转换函数表达式, 可通过{col_name}进行字段名的替换, 例如to_days({col_name})
+
+  - range_list : list, 分区条件列表, 设置每个分区名和分区条件比较值, 仅range, list使用
+
+    - name : str, 分区名, 不设置或设置为None代表自动生成分区名, 如果不是第一个分区字段无需设置(统一使用第一个分区字段的对应分区名)
+
+    - value : any, 分区条件比较值, 按不同分区类型应设置为不同的值
+
+      ​	注1: 如果为range, 该值设置为单一比较常量值, 例如 3, "'test'", "to_days('2021-10-11')", None(代表最大值MAXVALUE)
+
+      ​	注2: 如果为list, 该值应设置为list, 例如 [3, "'test'", 5, "to_days('2021-01-01')", None], None代表NULL
+
+      ​	注3: 如果值为字符串, 应使用单引号进行包裹, 例如"'str_value'"
+
+- sub_partition: dict, 子分区设置, 定义与主分区一致, 可以嵌套形成多级子分区
+
+  ​	注意: 每个主分区下都会嵌套创建一套相同的子分区
+
+#### 在操作数据时指定分区
+
+驱动的update、delete、query_list、query_iter、query_count、query_group_by函数均可支持对指定分区进行处理，可在函数调用时传入partition参数指定当次操作涉及的分区表，该参数的特殊说明如下：
+
+1、该参数仅支持传入str，也就是只能支持指定单分区，例如 partition='p1'
+
+2、除指定一级分区外，该参数也可以直接传入二级分区，例如 partition='s1'
+
+3、参数实际上传入的是分区表名的后缀，在sql上会自动拼接为完成的分区表名；

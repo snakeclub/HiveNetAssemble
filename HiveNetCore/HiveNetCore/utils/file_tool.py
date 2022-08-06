@@ -445,6 +445,27 @@ class FileTool(object):
                     src_path=_full_filename, dest_path=_full_destname, exist_ok=exist_ok
                 )
 
+    @classmethod
+    def copy_file(cls, src_file: str, dest_file: str, overwrite: bool = False):
+        """
+        复制文件到指定目录
+
+        @param {str} src_file - 源文件
+        @param {str} dest_file - 目标文件
+        @param {bool} overwrite=False - 文件已存在的情况下是否覆盖
+        """
+        if os.path.exists(dest_file):
+            # 文件已存在
+            if not overwrite:
+                raise FileExistsError('file exists: %s' % dest_file)
+        else:
+            # 文件不存在, 先创建目录
+            _path, _file_name = os.path.split(dest_file)
+            cls.create_dir(_path, exist_ok=True)
+
+        # 真正执行复制处理
+        shutil.copyfile(src_file, dest_file)
+
     #############################
     # 文件内容处理
     #############################
