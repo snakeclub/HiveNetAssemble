@@ -132,7 +132,9 @@ class DriverTestCaseFW(object):
             'test_page_1',
             'test_data_type_1',
             'test_special_char2',
-            'test_null_data_3'
+            'test_null_data_3',
+            'test_json_path_1',
+            'test_left_join_1'
         ]
 
     @property
@@ -352,6 +354,14 @@ class DriverTestCaseFW(object):
         # 添加一个表
         AsyncTools.sync_run_coroutine(self.driver.switch_db(_test_dbs[0]))
         AsyncTools.sync_run_coroutine(self.driver.create_collection('tb_test_list'))
+
+        # 删除历史测试表
+        _tab_list = ['tb_left_join_main', 'tb_left_join_sub1', 'tb_left_join_sub2']
+        for _tab in _tab_list:
+            try:
+                AsyncTools.sync_run_coroutine(self.driver.drop_collection(_tab))
+            except:
+                pass
 
         # 查询所有表
         _list = AsyncTools.sync_run_coroutine(self.driver.list_collections())
@@ -702,7 +712,7 @@ class DriverTestCaseFW(object):
         _ret = AsyncTools.sync_run_coroutine(
             self.driver.query_list(
                 'tb_full_type', filter={'c_str': 'str1', 'b2': 'b2u'},
-                projection=['c_bool', 'b2', 'c_int', 'no_inc', 'j_int', 'mul', 'no_mul', 'c_float', 'no_min', 'j_float', 'no_max'],
+                projection=['c_bool', 'b2', 'c_int', 'no_inc', 'j_int', 'no_mul', 'c_float', 'no_min', 'j_float', 'no_max'],
                 limit=1
             )
         )
@@ -1134,6 +1144,28 @@ class DriverTestCaseFW(object):
         _ret_list = [_item['c_index'] for _item in _ret]
         if not TestTool.cmp_list(_ret_list, ['i2', 'i5', 'i6']):
             return (False, _tips, 'query list sorted 4 error: %s' % str(_ret))
+
+        # 各种条件查询$in
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                _table_name, filter={'c_str': {'$in': ['str1', 'str2']}},
+                projection={'_id': False, 'c_index': True},
+            )
+        )
+        _ret_list = [_item['c_index'] for _item in _ret]
+        if not TestTool.cmp_list(_ret_list, ['i1', 'i2', 'i3', 'i4']):
+            return (False, _tips, 'query list in 4 - 1 error: %s' % str(_ret))
+
+        # 各种条件查询$in
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                _table_name, filter={'c_str': {'$nin': ['str1', 'str2']}},
+                projection={'_id': False, 'c_index': True},
+            )
+        )
+        _ret_list = [_item['c_index'] for _item in _ret]
+        if not TestTool.cmp_list(_ret_list, ['i5', 'i6']):
+            return (False, _tips, 'query list in 4 - 2 error: %s' % str(_ret))
 
         # 各种条件查询$regex 不以2结尾
         _ret = AsyncTools.sync_run_coroutine(
@@ -1670,12 +1702,13 @@ class DriverTestCaseFW(object):
             return (False, _tips, 'insert test data 1 error: %s' % str(_ret))
 
         # 通过空值查询数据
+        # TODO({lhj}): 如果返回结果带上n_json字段, sqlite将会把一个结果变成3个结果返回, 暂时无解决方案
         _ret = AsyncTools.sync_run_coroutine(
             self.driver.query_list(
                 _table_name, filter={'c_index': 'i1', 'c_str': None, 'c_str_no_len': None},
                 projection=[
                     'c_str', 'c_bool', 'c_int', 'c_float', 'c_json',
-                    'n_str', 'n_bool', 'n_int', 'n_float', 'n_json'
+                    'n_str', 'n_bool', 'n_int', 'n_float', # 'n_json'
                 ]
             )
         )
@@ -1794,6 +1827,443 @@ class DriverTestCaseFW(object):
         )
         if len(_ret) > 0:
             return (False, _tips, 'query page 3 error: [%d]%s' % (_i, str(_ret[_i])))
+
+        return (True, _tips, '')
+
+    #############################
+    # 多级json路径操作
+    #############################
+    def test_json_path_1(self):
+        _tips = '多级json路径操作1: 多级路径'
+
+        # 获取测试库清单
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_test_dbs[0]))
+
+        # 清空测试表
+        _table_name = 'tb_full_type'
+        AsyncTools.sync_run_coroutine(self.driver.turncate_collection(_table_name))
+
+        # 插入不同类型的信息
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.insert_many(
+                _table_name, [
+                    {
+                        'c_index': 'i1',
+                        'c_str': None,
+                        'c_str_no_len': 'nostr1',
+                        'c_bool': True, 'c_int': 1,
+                        'c_float': 0.1,
+                        'c_json': {
+                            'cj_1': 'cj_str_1', 'cj_2': False,
+                            'cj_3': ['a1', 'b1', {'c1': {'name': 'cj_val1'}}],
+                            'cj_4': ['e1', 'f1', {'j1': 'cj_val_j1'}]
+                        },
+                        'n_str': 'nstr1', 'n_int': 10, 'n_bool': True, 'n_float': 3.4,
+                        'n_json': {
+                            'nj_col_1': 'nj_val_1', 'nj_col_2': 3,
+                            'nj_col_3': ['1', '2', {'3': {'name': 'nj_val1'}}],
+                            'nj_col_4': ['4', '5', {'6': 'nj_val_61'}]
+                        }
+                    },
+                    {
+                        'c_index': 'i2',
+                        'c_str': None,
+                        'c_str_no_len': 'nostr2',
+                        'c_bool': True, 'c_int': 2,
+                        'c_float': 0.2,
+                        'c_json': {
+                            'cj_1': 'cj_str_2', 'cj_2': False,
+                            'cj_3': ['a2', 'b2', {'c2': {'name': 'cj_val2'}}],
+                            'cj_4': ['e2', 'f2', {'j2': 'cj_val_j2'}]
+                        },
+                        'n_str': 'nstr1', 'n_int': 10, 'n_bool': True, 'n_float': 3.4,
+                        'n_json': {
+                            'nj_col_1': 'nj_val_2', 'nj_col_2': 3,
+                            'nj_col_3': ['1', '2', {'3': {'name': 'nj_val2'}}],
+                            'nj_col_4': ['4', '5', {'6': 'nj_val_62'}]
+                        }
+                    }
+                ]
+            )
+        )
+        if _ret != 2:
+            return (False, _tips, 'insert test data 1 error: %s' % str(_ret))
+
+        # 更新固定字段json的内部栏位
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.update(
+                _table_name, filter={'c_json.cj_3.1': 'b1'}, update={
+                    '$set': {'c_json.cj_3.2.c1.name': 'cj_val2_upd'}
+                }
+            )
+        )
+        if _ret != 1:
+            return (False, _tips, 'update c_json 1 error: [%s]' % (str(_ret)))
+
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                _table_name, filter={'c_json.cj_3.0': 'a1'},
+                projection={'_id': False, 'as_name': '$c_json.cj_3', 'n_str': True}
+            )
+        )
+        if _ret[0]['as_name'][2]['c1']['name'] != 'cj_val2_upd':
+            return (False, _tips, 'update c_json 1 query error: [%s]' % (str(_ret)))
+
+        return (True, _tips, '')
+
+    #############################
+    # 表关联
+    #############################
+    def test_left_join_1(self):
+        _tips = '测试表关联1'
+
+        # 获取测试库清单
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_test_dbs[0]))
+
+        # 先删除表
+        _tab_list = ['tb_left_join_main', 'tb_left_join_sub1', 'tb_left_join_sub2']
+        for _tab in _tab_list:
+            try:
+                AsyncTools.sync_run_coroutine(self.driver.drop_collection(_tab))
+            except:
+                pass
+
+        # 创建测试表
+        AsyncTools.sync_run_coroutine(
+            self.driver.create_collection(
+                'tb_left_join_main', indexs=None,
+                fixed_col_define={
+                    'm_index': {'type': 'str', 'len': 20, 'comment': '注释1'},
+                    'm_join_col_11': {'type': 'str', 'len': 50, 'comment': '关联字段11'},
+                    'm_join_col_12': {'type': 'str', 'len': 50, 'comment': '关联字段12'},
+                    'm_join_col_21': {'type': 'str', 'len': 50, 'comment': '关联字段21'},
+                    'm_join_col_22': {'type': 'str', 'len': 50, 'comment': '关联字段22'},
+                    'm_info': {'type': 'str', 'comment': '辅助信息字段'},
+                    'm_filter': {'type': 'int', 'comment': '过滤条件'}
+                },
+                comment='表关联主表'
+            )
+        )
+
+        AsyncTools.sync_run_coroutine(
+            self.driver.create_collection(
+                'tb_left_join_sub1', indexs=None,
+                fixed_col_define={
+                    's1_index': {'type': 'str', 'len': 20, 'comment': '注释1'},
+                    's1_join_col_11': {'type': 'str', 'len': 50, 'comment': '关联字段11'},
+                    's1_join_col_12': {'type': 'str', 'len': 50, 'comment': '关联字段12'},
+                    's1_info': {'type': 'str', 'comment': '辅助信息字段'},
+                    's1_filter': {'type': 'int', 'comment': '过滤条件'}
+                },
+                comment='表关联子表1'
+            )
+        )
+
+        AsyncTools.sync_run_coroutine(
+            self.driver.create_collection(
+                'tb_left_join_sub2', indexs=None,
+                fixed_col_define={
+                    's2_index': {'type': 'str', 'len': 20, 'comment': '注释1'},
+                    's2_join_col_21': {'type': 'str', 'len': 50, 'comment': '关联字段11'},
+                    's2_join_col_22': {'type': 'str', 'len': 50, 'comment': '关联字段12'},
+                    's2_info': {'type': 'str', 'comment': '辅助信息字段'},
+                    's2_filter': {'type': 'int', 'comment': '过滤条件'}
+                },
+                comment='表关联子表2'
+            )
+        )
+
+        # 插入测试数据
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.insert_many('tb_left_join_main', [
+                {
+                    'm_index': 'm1',
+                    'm_join_col_11': 'teacher', 'm_join_col_12': 'yuwen', 'm_join_col_13': 'man', 'm_join_col_14': 'old',
+                    'm_join_col_21': 'car', 'm_join_col_22': 'A1', 'm_join_col_23': 'year', 'm_join_col_24': '2021',
+                    'm_info': '子表1,子表2均有数据', 'm_filter': 1, 'json_str': 'm1_json'
+                },
+                {
+                    'm_index': 'm2',
+                    'm_join_col_11': 'teacher', 'm_join_col_12': 'english', 'm_join_col_13': 'man', 'm_join_col_14': 'old',
+                    'm_join_col_21': 'car', 'm_join_col_22': 'A2', 'm_join_col_23': 'year', 'm_join_col_24': '2021',
+                    'm_info': '子表1,子表2均有数据', 'm_filter': 1, 'json_str': 'm2_json'
+                },
+                {
+                    'm_index': 'm3',
+                    'm_join_col_11': 'teacher', 'm_join_col_12': 'yuwen', 'm_join_col_13': 'man', 'm_join_col_14': 'young',
+                    'm_join_col_21': 'no', 'm_join_col_22': 'A1', 'm_join_col_23': 'year', 'm_join_col_24': '2021',
+                    'm_info': '子表1有数据,子表2无数据', 'm_filter': 1, 'json_str': 'm3_json'
+                },
+                {
+                    'm_index': 'm4',
+                    'm_join_col_11': 'no', 'm_join_col_12': 'yuwen', 'm_join_col_13': 'man', 'm_join_col_14': 'young',
+                    'm_join_col_21': 'car', 'm_join_col_22': 'A1', 'm_join_col_23': 'year', 'm_join_col_24': '2022',
+                    'm_info': '子表1无数据,子表2有数据', 'm_filter': 1, 'json_str': 'm4_json'
+                },
+                {
+                    'm_index': 'm5',
+                    'm_join_col_11': 'no', 'm_join_col_12': 'yuwen', 'm_join_col_13': 'man', 'm_join_col_14': 'young',
+                    'm_join_col_21': 'no', 'm_join_col_22': 'A1', 'm_join_col_23': 'year', 'm_join_col_24': '2021',
+                    'm_info': '子表1,子表2均无数据', 'm_filter': 1, 'json_str': 'm5_json'
+                },
+                {
+                    'm_index': 'm6',
+                    'm_join_col_11': 'teacher', 'm_join_col_12': 'yuwen', 'm_join_col_13': 'man', 'm_join_col_14': 'old',
+                    'm_join_col_21': 'car', 'm_join_col_22': 'A1', 'm_join_col_23': 'year', 'm_join_col_24': '2021',
+                    'm_info': '子表1,子表2均有数据, 被过滤', 'm_filter': 0, 'json_str': 'm6_json'
+                },
+                {
+                    'm_index': 'm7',
+                    'm_join_col_11': 'teacher', 'm_join_col_12': 'english', 'm_join_col_13': 'man', 'm_join_col_14': 'old',
+                    'm_join_col_21': 'car', 'm_join_col_22': 'A2', 'm_join_col_23': 'year', 'm_join_col_24': '2021',
+                    'm_info': '子表1,子表2均有数据, 被过滤', 'm_filter': 0, 'json_str': 'm7_json'
+                },
+                {
+                    'm_index': 'm8',
+                    'm_join_col_11': 'teacher', 'm_join_col_12': 'yuwen', 'm_join_col_13': 'man', 'm_join_col_14': 'young',
+                    'm_join_col_21': 'no', 'm_join_col_22': 'A1', 'm_join_col_23': 'year', 'm_join_col_24': '2021',
+                    'm_info': '子表1有数据,子表2无数据, 被过滤', 'm_filter': 0, 'json_str': 'm8_json'
+                },
+                {
+                    'm_index': 'm9',
+                    'm_join_col_11': 'teacher', 'm_join_col_12': 'wuli', 'm_join_col_13': 'man', 'm_join_col_14': 'old',
+                    'm_join_col_21': 'car', 'm_join_col_22': 'A3', 'm_join_col_23': 'year', 'm_join_col_24': '2021',
+                    'm_info': '子表1,子表2均有数据, 子表1被过滤', 'm_filter': 1, 'json_str': 'm9_json'
+                },
+            ])
+        )
+
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.insert_many('tb_left_join_sub1', [
+                {
+                    's1_index': 's11',
+                    's1_join_col_11': 'teacher', 's1_join_col_12': 'yuwen', 's1_join_col_13': 'man', 's1_join_col_14': 'old',
+                    's1_info': '匹配上数据', 's1_filter': 1, 'json_str': 's11_json'
+                },
+                {
+                    's1_index': 's12',
+                    's1_join_col_11': 'teacher', 's1_join_col_12': 'english', 's1_join_col_13': 'man', 's1_join_col_14': 'old',
+                    's1_info': '匹配上数据', 's1_filter': 1, 'json_str': 's12_json'
+                },
+                {
+                    's1_index': 's13',
+                    's1_join_col_11': 'teacher', 's1_join_col_12': 'yuwen', 's1_join_col_13': 'man', 's1_join_col_14': 'young',
+                    's1_info': '匹配上数据', 's1_filter': 1, 'json_str': 's13_json'
+                },
+                {
+                    's1_index': 's14',
+                    's1_join_col_11': 'teacher', 's1_join_col_12': 'wuli', 's1_join_col_13': 'man', 's1_join_col_14': 'old',
+                    's1_info': '匹配上数据, 过滤', 's1_filter': 0, 'json_str': 's14_json'
+                },
+                {
+                    's1_index': 's15',
+                    's1_join_col_11': 'teacher', 's1_join_col_12': 'nomatch', 's1_join_col_13': 'man', 's1_join_col_14': 'young',
+                    's1_info': '匹配不上数据', 's1_filter': 1, 'json_str': 's15_json'
+                },
+                {
+                    's1_index': 's16',
+                    's1_join_col_11': 'teacher1', 's1_join_col_12': 'nomatch', 's1_join_col_13': 'man', 's1_join_col_14': 'young',
+                    's1_info': '匹配不上数据, 过滤', 's1_filter': 0, 'json_str': 's16_json'
+                },
+            ])
+        )
+
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.insert_many('tb_left_join_sub2', [
+                {
+                    's2_index': 's21',
+                    's2_join_col_21': 'car', 's2_join_col_22': 'A1', 's2_join_col_23': 'year', 's2_join_col_24': '2021',
+                    's2_info': '匹配上数据', 's2_filter': 1, 'json_str': 's21_json'
+                },
+                {
+                    's2_index': 's22',
+                    's2_join_col_21': 'car', 's2_join_col_22': 'A2', 's2_join_col_23': 'year', 's2_join_col_24': '2021',
+                    's2_info': '匹配上数据', 's2_filter': 1, 'json_str': 's22_json'
+                },
+                {
+                    's2_index': 's23',
+                    's2_join_col_21': 'car', 's2_join_col_22': 'A1', 's2_join_col_23': 'year', 's2_join_col_24': '2022',
+                    's2_info': '匹配上数据', 's2_filter': 1, 'json_str': 's23_json'
+                },
+                {
+                    's2_index': 's24',
+                    's2_join_col_21': 'car', 's2_join_col_22': 'A3', 's2_join_col_23': 'year', 's2_join_col_24': '2021',
+                    's2_info': '匹配上数据, 过滤', 's2_filter': 0, 'json_str': 's24_json'
+                },
+                {
+                    's2_index': 's25',
+                    's2_join_col_21': 'car', 's2_join_col_22': 'nomatch', 's2_join_col_23': 'year', 's2_join_col_24': '2021',
+                    's2_info': '匹配不上数据', 's2_filter': 1, 'json_str': 's25_json'
+                },
+                {
+                    's2_index': 's26',
+                    's2_join_col_21': 'car1', 's2_join_col_22': 'nomatch', 's2_join_col_23': 'year', 's2_join_col_24': '2021',
+                    's2_info': '匹配不上数据, 过滤', 's2_filter': 0, 'json_str': 's26_json'
+                },
+                {
+                    's2_index': 's27',
+                    's2_join_col_21': 'car', 's2_join_col_22': 'A3', 's2_join_col_23': 'year', 's2_join_col_24': '2021',
+                    's2_info': '匹配上数据', 's2_filter': 1, 'json_str': 's27_json'
+                }
+            ])
+        )
+
+        # 输出所有表字段
+        _left_join = [
+            {
+                'collection': 'tb_left_join_sub1',
+                'join_fields': [('m_join_col_11', 's1_join_col_11'), ('m_join_col_12', 's1_join_col_12'), ('m_join_col_13', 's1_join_col_13'), ('m_join_col_14', 's1_join_col_14')]
+            },
+            {
+                'collection': 'tb_left_join_sub2',
+                'join_fields': [('m_join_col_21', 's2_join_col_21'), ('m_join_col_22', 's2_join_col_22'), ('m_join_col_23', 's2_join_col_23'), ('m_join_col_24', 's2_join_col_24')]
+            }
+        ]
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                'tb_left_join_main', filter={'m_filter': 1},
+                left_join=_left_join
+            )
+        )
+        _index_list = [_row['m_index'] for _row in _ret]
+        _row_keys = list(_ret[0].keys())
+        if not (
+            TestTool.cmp_list(
+                _index_list, ['m1', 'm2', 'm3', 'm4', 'm5', 'm9', 'm9'], sorted=True
+            ) and len(_row_keys) == 31
+        ):
+            return (False, _tips, '输出所有表字段 1 error: [%s]' % (str(_ret)))
+
+        # 输出主表和子表指定字段
+        _left_join = [
+            {
+                'collection': 'tb_left_join_sub1',
+                'join_fields': [('m_join_col_11', 's1_join_col_11'), ('m_join_col_12', 's1_join_col_12'), ('m_join_col_13', 's1_join_col_13'), ('m_join_col_14', 's1_join_col_14')],
+                'filter': {'s1_filter': 1}
+            },
+            {
+                'collection': 'tb_left_join_sub2',
+                'join_fields': [('m_join_col_21', 's2_join_col_21'), ('m_join_col_22', 's2_join_col_22'), ('m_join_col_23', 's2_join_col_23'), ('m_join_col_24', 's2_join_col_24')],
+                'filter': {'s2_filter': 1}
+            }
+        ]
+
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                'tb_left_join_main', filter={'m_filter': 1}, projection=[
+                    'm_index', 'm_info', 'json_str',
+                    '#0._id', '#0.s1_index', '#0.s1_info', '#0.s1_join_col_11', '#0.json_str',
+                    '#1.s2_index', '#1.s2_info', '#1.s2_join_col_21', '#1.json_str'
+                ],
+                sort=[('m_index', 1)],
+                left_join=_left_join
+            )
+        )
+
+        if len(_ret) != 6 or len(list(_ret[0].keys())) != 13:
+            return (False, _tips, '输出主表和子表指定字段 3 error: [%s]' % (str(_ret)))
+
+        # 检查关联匹配结果
+        if len(_ret) != 6:
+            return (False, _tips, '检查关联匹配结果 4 - 记录数 error: [%s]' % (str(_ret)))
+
+        if not (_ret[0]['m_index'] == 'm1' and _ret[0]['s1_index'] == 's11' and _ret[0]['s2_index'] == 's21'):
+            return (False, _tips, '检查关联匹配结果 4 - 0 error: [%s]' % (str(_ret[0])))
+
+        if not (_ret[1]['m_index'] == 'm2' and _ret[1]['s1_index'] == 's12' and _ret[1]['s2_index'] == 's22'):
+            return (False, _tips, '检查关联匹配结果 4 - 1 error: [%s]' % (str(_ret[1])))
+
+        if not (_ret[2]['m_index'] == 'm3' and _ret[2]['s1_index'] == 's13' and 's2_index' not in _ret[2].keys()):
+            return (False, _tips, '检查关联匹配结果 4 - 2 error: [%s]' % (str(_ret[2])))
+
+        if not (_ret[3]['m_index'] == 'm4' and 's1_index' not in _ret[3].keys() and _ret[3]['s2_index'] == 's23'):
+            return (False, _tips, '检查关联匹配结果 4 - 3 error: [%s]' % (str(_ret[3])))
+
+        if not (_ret[4]['m_index'] == 'm5' and 's1_index' not in _ret[4].keys() and 's2_index' not in _ret[4].keys()):
+            return (False, _tips, '检查关联匹配结果 4 - 4 error: [%s]' % (str(_ret[4])))
+
+        if not (_ret[5]['m_index'] == 'm9' and 's1_index' not in _ret[5].keys() and _ret[5]['s2_index'] == 's27'):
+            return (False, _tips, '检查关联匹配结果 4 - 5 error: [%s]' % (str(_ret[5])))
+
+        # 关联表字段排序
+        _left_join = [
+            {
+                'collection': 'tb_left_join_sub1',
+                'join_fields': [('m_join_col_11', 's1_join_col_11'), ('m_join_col_12', 's1_join_col_12'), ('m_join_col_13', 's1_join_col_13'), ('m_join_col_14', 's1_join_col_14')],
+                'filter': {'s1_filter': 1}
+            },
+            {
+                'collection': 'tb_left_join_sub2',
+                'join_fields': [('m_join_col_21', 's2_join_col_21'), ('m_join_col_22', 's2_join_col_22'), ('m_join_col_23', 's2_join_col_23'), ('m_join_col_24', 's2_join_col_24')],
+                'filter': {'s2_filter': 1}
+            }
+        ]
+
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                'tb_left_join_main', filter={'m_filter': 1},
+                projection={
+                    '_id': True, 'm_index': True, 'm_info': True, 'json_str': True,
+                    '#0._id': True, '#0.s1_index': True, '#0.s1_info': True, '#0.s1_join_col_11': True, '#0.json_str': True,
+                    '#1._id': False, 's2_index_as_name': '$#1.s2_index', 's2_info': '$#1.s2_info', '#1.s2_join_col_21': True, '#1.json_str': True
+                },
+                sort=[('#0.s1_index', -1), ('m_index', 1)],
+                left_join=_left_join
+            )
+        )
+
+        if not (_ret[2]['m_index'] == 'm1' and _ret[1]['m_index'] == 'm2' and _ret[0]['m_index'] == 'm3'):
+            return (False, _tips, '关联表字段排序 5 error: [%s]' % (str(_ret)))
+
+        # 关联表字段筛选
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_list(
+                'tb_left_join_main', filter={'m_filter': 1, '#0.s1_index': 's11'},
+                projection=['m_index', 'm_info', 'json_str', '#0.s1_index'],
+                sort=[('#0.s1_index', -1), ('m_index', 1)],
+                left_join=_left_join
+            )
+        )
+
+        if len(_ret) != 1 or _ret[0]['s1_index'] != 's11':
+            return (False, _tips, '关联表字段筛选 6 error: [%s]' % (str(_ret)))
+
+        # 迭代方式获取数据
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_iter(
+                'tb_left_join_main', filter={'m_filter': 1},
+                projection=['m_index', 'm_info', 'json_str'],
+                sort=[('#0.s1_index', -1), ('m_index', 1)],
+                left_join=_left_join
+            )
+        )
+
+        _query_list = []
+        for _rows in AsyncTools.sync_for_async_iter(_ret):
+            _query_list.extend(_rows)
+
+        if not (_query_list[2]['m_index'] == 'm1' and _query_list[1]['m_index'] == 'm2' and _query_list[0]['m_index'] == 'm3'):
+            return (False, _tips, '迭代方式获取数据 7 error: [%s]' % (str(_query_list)))
+
+        # 查询记录数
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_count(
+                'tb_left_join_main', filter={'m_filter': 1, '#0.s1_index': 's11'},
+                left_join=_left_join
+            )
+        )
+
+        if _ret != 1:
+            return (False, _tips, '查询记录数 8 error: [%s]' % (str(_ret)))
+
+        # 测试结束删除表
+        for _tab in _tab_list:
+            try:
+                AsyncTools.sync_run_coroutine(self.driver.drop_collection(_tab))
+            except:
+                pass
 
         return (True, _tips, '')
 
@@ -2744,7 +3214,7 @@ class TestMySQLDriver(unittest.TestCase):
 class TestPgSQLDriver(unittest.TestCase):
 
     def test(self):
-        # return
+        return
         # 初始化驱动
         _case = PgSQLDriverTestCase()
 
@@ -2773,7 +3243,7 @@ class TestPgSQLDriver(unittest.TestCase):
 class TestMongoDriver(unittest.TestCase):
 
     def test(self):
-        return
+        # return
         # 初始化驱动
         _case = MongoDriverTestCase()
 

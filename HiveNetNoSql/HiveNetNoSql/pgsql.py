@@ -19,6 +19,7 @@ import json
 from bson.objectid import ObjectId
 from typing import Any, Union
 from HiveNetCore.utils.run_tool import AsyncTools
+from HiveNetCore.utils.validate_tool import ValidateTool
 from HiveNetCore.connection_pool import PoolConnectionFW
 # 自动安装依赖库
 from HiveNetCore.utils.pyenv_tool import PythonEnvTools
@@ -413,11 +414,12 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         """
         pass
 
-    async def _get_cols_info(self, collection: str, session: Any = None) -> list:
+    async def _get_cols_info(self, collection: str, db_name: str = None, session: Any = None) -> list:
         """
         获取制定集合(表)的列信息
 
         @param {str} collection - 集合名(表)
+        @param {str} db_name=None - 数据库名(不指定代表默认当前数据库)
         @param {Any} session=None - 指定事务连接对象
 
         @returns {list} - 字典形式的列信息数组, 注意列名为name, 类型为type(类型应为标准类型: str, int, float, bool, json)
@@ -430,8 +432,9 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             _cursor = None
 
         # 获取表结构
+        _db_name = self._db_name if db_name is None else db_name
         _sql = "select column_name as name, data_type as type from information_schema.columns where table_schema='%s' and table_name='%s' order by ordinal_position" % (
-            self._db_name, collection
+            _db_name, collection
         )
         _ret = await self._execute_sql(
             _sql, paras=None, is_query=True, conn=_conn, cursor=_cursor
@@ -567,7 +570,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             '\n', '\\n').replace('\t', '\\t').replace("'", "''").replace('"', '\\"')
 
     def _get_filter_unit_sql(self, key: str, val: Any, fixed_col_define: dict = None,
-            sql_paras: list = []) -> str:
+            sql_paras: list = [], left_join: list = None, session=None) -> str:
         """
         获取兼容mongodb过滤条件规则的单个规则对应的sql
 
@@ -579,29 +582,67 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
+        @param {list} left_join=None - 左关联配置
+        @param {Any} session=None - 数据库事务连接对象
 
         @returns {str} - 单个规则对应的sql
         """
-        # 判断是否处理json的值, 形成最后比较的 key 值
+        # 根据字段判断是主表还是关联表
         _key = key
+        _fixed_cols = None
+        if _key[0] != '#':
+            # 主表的过滤条件
+            _as_name = ''
+            if fixed_col_define is not None:
+                _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
+        else:
+            # 关联表的过滤条件
+            _index = _key.find('.')
+            _join_para = left_join[int(_key[1: _index])]
+            _key = _key[_index+1:]
+
+            _join_db_name = _join_para.get('db_name', self._db_name)
+            _join_tab = _join_para['collection']
+            _as_name = '"%s".' % _join_para.get('as', _join_tab)
+
+            _fixed_col_define = AsyncTools.sync_run_coroutine(self._get_fixed_col_define(
+                _join_tab, db_name=_join_db_name, session=session
+            ))
+            if _fixed_col_define is not None:
+                _fixed_cols = copy.deepcopy(_fixed_col_define.get('cols', []))
+
+        # 判断是否处理json的值, 形成最后比较的 key 值
         _col_type = None
         _is_json = False
         _cast_by_val = False  # 是否需要根据比较值判断类型
-        if fixed_col_define is not None:
-            _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
-            if key != '_id' and key not in _fixed_cols:
+        if _fixed_cols is not None:
+            if _key != '_id' and _key not in _fixed_cols:
                 _is_json = True
+                _path_cols = _key.split('.')
+                if len(_path_cols) > 1 and _path_cols[0] in _fixed_cols:
+                    # json固定字段
+                    _path = self._convert_jsonset_array(_path_cols[1:])
+                    _col_name = _path_cols[0]
+                else:
+                    _path = self._convert_jsonset_array(_path_cols)
+                    _col_name = 'nosql_driver_extend_tags'
+
                 _col_type = fixed_col_define.get('define', {}).get(_key, {}).get('type', None)
                 if _col_type is None:
-                    _key = "\"nosql_driver_extend_tags\"->'%s'" % key
+                    _key = "%s\"%s\"#>'{%s}'" % (_as_name, _col_name, _path)
+                    # _key = "jsonb_path_query_first(\"%s\", '$.%s')" % (_col_name, _path)
+                    # _key = "\"%s\"->'%s'" % (_col_name, _path)
                     _cast_by_val = True
                 elif _col_type == 'str':
-                    # 字符串返回, 否则会带双引号
-                    _key = "\"nosql_driver_extend_tags\"->>'%s'" % key
+                    # 字符串返回, 去除头尾的双引号(否则会带双引号)
+                    _key = "%s\"%s\"#>>'{%s}'" % (_as_name, _col_name, _path)
+                    # _key = "right(left(cast(jsonb_path_query_first(\"%s\", '$.%s') as varchar), -1), -1)" % (_col_name, _path)
+                    # _key = "\"nosql_driver_extend_tags\"->>'%s'" % key
                 else:
-                    _key = "cast(\"nosql_driver_extend_tags\"->'%s' as %s)" % (
-                        key, self._dbtype_cast_mapping[_col_type]
-                    )
+                    _key = "cast(%s\"%s\"#>'{%s}' as %s)" % (_as_name, _col_name, _path, self._dbtype_cast_mapping[_col_type])
+                    # _key = "cast(jsonb_path_query_first(\"%s\", '$.%s'), as %s)" % (
+                    #     _col_name, _path, self._dbtype_cast_mapping[_col_type]
+                    # )
 
         if type(val) == dict:
             # 有特殊规则
@@ -610,21 +651,45 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 if _op in self._filter_symbol_mapping.keys():
                     # 比较值转换为数据库的格式
                     _dbtype, _cmp_val = self._python_to_dbtype(_para)
-                    if _is_json and _cast_by_val:
-                        if _dbtype == 'str':
-                            _key = "\"nosql_driver_extend_tags\"->>'%s'" % key
-                        else:
-                            _key = 'cast(%s as %s)' % (_key, self._dbtype_cast_mapping[_dbtype])
+                    if _is_json:
+                        # json字段
+                        if _cast_by_val:
+                            if _dbtype == 'str':
+                                _key = 'right(left(cast(%s as varchar), -1), -1)' % _key
+                            else:
+                                _key = 'cast(%s as %s)' % (_key, self._dbtype_cast_mapping[_dbtype])
                     else:
-                        _key = '"%s"' % _key
+                        # 固定字段
+                        _key = '%s"%s"' % (_as_name, _key)
 
                     _cds.append('%s %s %s' % (_key, self._filter_symbol_mapping[_op], '%s'))
                     sql_paras.append(_cmp_val)
-                elif _op == '$regex':
-                    if _is_json and _cast_by_val:
-                        _key = "\"nosql_driver_extend_tags\"->>'%s'" % key
+                elif _op in ('$in', '$nin'):
+                    # in 和 not in
+                    if _is_json:
+                        # json字段
+                        if _cast_by_val:
+                            _dbtype, _cmp_val = self._python_to_dbtype(_para[0])
+                            if _dbtype == 'str':
+                                _key = 'right(left(cast(%s as varchar), -1), -1)' % _key
+                            else:
+                                _key = 'cast(%s as %s)' % (_key, self._dbtype_cast_mapping[_dbtype])
                     else:
-                        _key = '"%s"' % _key
+                        # 固定字段
+                        _key = '%s"%s"' % (_as_name, _key)
+
+                    _cds.append('%s %s (%s)' % (
+                        _key, 'in' if _op == '$in' else 'not in', ','.join(['%s' for _item in _para])
+                    ))
+                    for _item in _para:
+                        _dbtype, _cmp_val = self._python_to_dbtype(_item)
+                        sql_paras.append(_cmp_val)
+                elif _op == '$regex':
+                    if _is_json:
+                        if _cast_by_val:
+                            _key = 'right(left(cast(%s as varchar), -1), -1)' % _key
+                    else:
+                        _key = '%s"%s"' % (_as_name, _key)
 
                     _cds.append("%s %s %s" % (_key, self._regexp_op, '%s'))
                     sql_paras.append(_para)
@@ -634,22 +699,22 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         else:
             # 直接相等的条件
             if val is None:
-                _sql = '%s is NULL' % (_key if _is_json else '"%s"' % _key)
+                _sql = '%s is NULL' % (_key if _is_json else '%s"%s"' % (_as_name, _key))
             else:
                 _dbtype, _cmp_val = self._python_to_dbtype(val)
                 if _is_json and _cast_by_val:
                     if _dbtype == 'str':
-                        _key = "\"nosql_driver_extend_tags\"->>'%s'" % key
+                        _key = 'right(left(cast(%s as varchar), -1), -1)' % _key
                     else:
                         _key = 'cast(%s as %s)' % (_key, self._dbtype_cast_mapping[_dbtype])
 
-                _sql = '%s = %s' % (_key if _is_json else '"%s"' % _key, '%s')
+                _sql = '%s = %s' % (_key if _is_json else '%s"%s"' % (_as_name, _key), '%s')
                 sql_paras.append(_cmp_val)
 
         return _sql
 
     def _get_filter_sql(self, filter: dict, fixed_col_define: dict = None,
-            sql_paras: list = []) -> str:
+            sql_paras: list = [], left_join: list = None, session=None) -> str:
         """
         获取兼容mongodb过滤条件规则的sql语句
 
@@ -660,6 +725,8 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
+        @param {list} left_join=None - 左关联配置
+        @param {Any} session=None - 数据库事务连接对象
 
         @returns {str} - 返回的sql语句, 如果没有条件则返回None
         """
@@ -675,7 +742,8 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 for _condition in _val:
                     # 逐个条件处理
                     _where = self._get_filter_sql(
-                        _condition, fixed_col_define=fixed_col_define, sql_paras=sql_paras
+                        _condition, fixed_col_define=fixed_col_define, sql_paras=sql_paras,
+                        left_join=left_join, session=session
                     )
                     if len(_condition) > 1:
                         # 多条件的情况，需要增加括号进行集合处理
@@ -691,7 +759,8 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             else:
                 # 正常的and条件
                 _where = self._get_filter_unit_sql(
-                    _col, _val, fixed_col_define=fixed_col_define, sql_paras=sql_paras
+                    _col, _val, fixed_col_define=fixed_col_define, sql_paras=sql_paras,
+                    left_join=left_join, session=session
                 )
                 # 添加条件
                 _condition_list.append(_where)
@@ -717,11 +786,10 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         # 更新辅助字典, key为要更新的字段名, value为{'sql': '对应的sql语句, 比如%s', 'paras': [传入sql的参数列表]}
         _upd_dict = {}
 
-        # 扩展字段的set字典, 设置json指定key的值, 每处理一个字段在sqls增加一个语句, 对应在paras参数列表
-        _extend_set_dict = {'sqls': [], 'paras': []}
-
-        # 扩展字段的remove列表, 设置要删除json的key的字段
-        _extend_remove_list = []
+        # 扩展字典, key为物理字段名, value为对应的扩展设置
+        # 'set_dict': {'sqls': [], 'paras': []} , 扩展字段的set字典, 设置json指定key的值, 每处理一个字段在sqls增加一个语句, 对应在paras参数列表
+        # 'remove_list': [] , 扩展字段的remove列表, 为要删除json的key的字段列表
+        _extend = {}
 
         # 遍历处理
         for _op, _para in update.items():
@@ -750,42 +818,52 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                         raise pgadapter.NotSupportedError('psycopg not support this update operation [%s]' % _op)
                 else:
                     # 是扩展字段
+                    _path_cols = _key.split('.')
+                    if len(_path_cols) > 1 and _path_cols[0] in fixed_col_define.get('cols', []):
+                        _col_name = _path_cols[0]
+                        _path = self._convert_jsonset_array(_path_cols[1:])
+                    else:
+                        _col_name = 'nosql_driver_extend_tags'
+                        _path = self._convert_jsonset_array(_path_cols)
+
+                    # 初始化扩展字典
+                    if _extend.get(_col_name, None) is None:
+                        _extend[_col_name] = {
+                            'set_dict': {'sqls': [], 'paras': []}, 'remove_list': []
+                        }
+
                     if _op == '$set':
                         _dbtype, _dbval = self._python_to_dbtype(_val, is_json=True)
                         if _dbtype in ('int', 'float', 'bool'):
-                            _sql = "'{{{key}}}', '{val}'"
+                            _sql = "'{{{path}}}', '{val}'"
                         elif _dbtype == 'json':
-                            _sql = "'{%s}', '%s'" % (_key, str(_dbval).replace("'", "''"))
-                            _extend_set_dict['sqls'].append(_sql)
+                            _sql = "'{%s}', '%s'" % (_path, str(_dbval).replace("'", "''"))
+                            _extend[_col_name]['set_dict']['sqls'].append(_sql)
                             continue
                         else:
-                            _sql = "'{%s}', '\"%s\"'" % (_key, self._db_quotes_str(str(_dbval)))
-                            _extend_set_dict['sqls'].append(_sql)
+                            _sql = "'{%s}', '\"%s\"'" % (_path, self._db_quotes_str(str(_dbval)))
+                            _extend[_col_name]['set_dict']['sqls'].append(_sql)
                             continue
                     elif _op == '$unset':
-                        _extend_remove_list.append(" - '%s'" % _key)
+                        _extend[_col_name]['remove_list'].append(" #- '{%s}'" % _path)
                         continue
                     elif _op in ('$inc', '$mul', '$min', '$max'):
                         _dbtype, _dbval = self._python_to_dbtype(_val, is_json=True)
                         # 需要取值出来, 添加查询字段
                         if _op == '$inc':
-                            _sql = "'{{{key}}}', to_jsonb(COALESCE(cast(nosql_driver_extend_tags->'{key}' as float), 0) + {val})"
-                            # _extend_set_dict['paras'].append(_dbval)
+                            _sql = "'{{{path}}}', to_jsonb(COALESCE(cast(\"{col_name}\"#>'{{{path}}}' as float), 0) + {val})"
                         elif _op == '$mul':
-                            _sql = "'{{{key}}}', to_jsonb(COALESCE(cast(nosql_driver_extend_tags->'{key}' as float), 0) * {val})"
-                            # _extend_set_dict['paras'].append(_dbval)
+                            _sql = "'{{{path}}}', to_jsonb(COALESCE(cast(\"{col_name}\"#>'{{{path}}}' as float), 0) * {val})"
                         elif _op == '$min':
-                            _sql = "'{{{key}}}', case when COALESCE(cast(nosql_driver_extend_tags->'{key}' as float), {val}) < {val} then to_jsonb(COALESCE(cast(nosql_driver_extend_tags->'{key}' as float), 0)) else '{val}' end"
-                            # _extend_set_dict['paras'].extend([_dbval, _dbval, _dbval])
+                            _sql = "'{{{path}}}', case when COALESCE(cast(\"{col_name}\"#>'{{{path}}}' as float), {val}) < {val} then to_jsonb(COALESCE(cast(\"{col_name}\"#>'{{{path}}}' as float), 0)) else '{val}' end"
                         elif _op == '$max':
-                            _sql = "'{{{key}}}', case when COALESCE(cast(nosql_driver_extend_tags->'{key}' as float), {val}) > {val} then to_jsonb(COALESCE(cast(nosql_driver_extend_tags->'{key}' as float), 0)) else '{val}' end"
-                            # _extend_set_dict['paras'].extend([_dbval, _dbval, _dbval])
+                            _sql = "'{{{path}}}', case when COALESCE(cast(\"{col_name}\"#>'{{{path}}}' as float), {val}) > {val} then to_jsonb(COALESCE(cast(\"{col_name}\"#>'{{{path}}}' as float), 0)) else '{val}' end"
                     else:
                         raise pgadapter.NotSupportedError('psycopg not support this update operation [%s]' % _op)
 
                     # 处理格式化
-                    _extend_set_dict['sqls'].append(
-                        _sql.format(key=_key, pos='%s', val=str(_dbval))
+                    _extend[_col_name]['set_dict']['sqls'].append(
+                        _sql.format(col_name=_col_name, path=_path, pos='%s', val=str(_dbval))
                     )
 
         # 开始生成sql语句和返回参数
@@ -796,30 +874,32 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 sql_paras.extend(_val['paras'])
 
         # 处理扩展字段
-        _remove_sql = ''
-        if len(_extend_remove_list) > 0:
-            _remove_sql = ''.join(_extend_remove_list)
+        for _col_name, _extend_para in _extend.items():
+            _remove_sql = ''
+            if len(_extend_para['remove_list']) > 0:
+                _remove_sql = ''.join(_extend_para['remove_list'])
 
-        if len(_extend_set_dict['sqls']) == 0:
-            if _remove_sql != '':
-                _sqls.append('nosql_driver_extend_tags=nosql_driver_extend_tags%s' % _remove_sql)
-        else:
-            # 嵌套更新值
-            _set_sql = 'nosql_driver_extend_tags'
-            for _sql in _extend_set_dict['sqls']:
-                _set_sql = 'jsonb_set(%s, %s, true)' % (_set_sql, _sql)
+            if len(_extend_para['set_dict']['sqls']) == 0:
+                if _remove_sql != '':
+                    _sqls.append('"%s"="%s"%s' % (_col_name, _col_name, _remove_sql))
+            else:
+                # 嵌套更新值
+                _set_sql = _col_name
+                for _sql in _extend_para['set_dict']['sqls']:
+                    _set_sql = 'jsonb_set(%s, %s, true)' % (_set_sql, _sql)
 
-            _sqls.append(
-                'nosql_driver_extend_tags=%s%s' % (
-                    _set_sql, _remove_sql
+                _sqls.append(
+                    '"%s"=%s%s' % (
+                        _col_name, _set_sql, _remove_sql
+                    )
                 )
-            )
-            sql_paras.extend(_extend_set_dict['paras'])
+                sql_paras.extend(_extend_para['set_dict']['paras'])
 
         return ','.join(_sqls)
 
     def _get_projection_sql(self, projection: Union[dict, list], fixed_col_define: dict = None,
-            sql_paras: list = [], is_group_by: bool = False) -> str:
+            sql_paras: list = [], is_group_by: bool = False, as_name: str = None,
+            left_join: list = None, session=None) -> str:
         """
         获取兼容mongodb查询返回字段的sql语句
 
@@ -833,47 +913,142 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
         @param {bool} is_group_by=False - 指定是否group by的处理, 如果是不会处理_id字段
+        @param {str} as_name=None - 字段对应的表别名
+        @param {list} left_join - 左关联配置
+        @param {Any} session=None - 数据库事务连接对象
 
         @returns {str} - 返回更新部分语句sql
         """
         # 如果不指定, 返回所有字段
         if projection is None:
-            return '*'
+            _project_sql = '%s*' % ('' if as_name is None else ('"%s".' % as_name))
+            if left_join is not None:
+                # 补充关联表的所有字段获取
+                for _join_para in left_join:
+                    _project_sql = '%s, "%s".*' % (
+                        _project_sql, _join_para.get('as', _join_para['collection'])
+                    )
+
+            return _project_sql
+
+        # 定义的内部函数
+        def _get_join_col_info(col: str, left_join: list, tab_as_name: str) -> tuple:
+            # 获取关联表列信息
+            if col[0] == '#':
+                _index = col.find('.')
+                _join_para = left_join[int(col[1: _index])]
+                _col = col[_index+1:]
+                _join_as_name = _join_para.get('as', _join_para['collection'])
+                _join_as_name_sql = '"%s".' % _join_as_name
+            else:
+                _col = col
+                _join_as_name = '_main_tab' if tab_as_name is None else tab_as_name
+                _join_as_name_sql = '' if tab_as_name is None else ('"%s".' % tab_as_name)
+
+            return _col, _join_as_name, _join_as_name_sql
 
         # 标准化要显示的字段清单
+        _projection = {}
         if type(projection) == dict:
-            _projection = []
-            for _col, _show in projection.items():
-                if _show:
-                    _projection.append(_col)
+            for _key, _show in projection.items():
+                if type(_show) == str and _show[0] == '$':
+                    _col, _tab_as_name, _tab_as_name_sql = _get_join_col_info(
+                        _show[1:], left_join, as_name
+                    )
+                    _projection[_key] = {
+                        'col': _col, 'tab_as': _tab_as_name, 'tab_as_sql': _tab_as_name_sql,
+                        'col_as': _key
+                    }
+                elif _show:
+                    _col, _tab_as_name, _tab_as_name_sql = _get_join_col_info(
+                        _key, left_join, as_name
+                    )
+                    _projection[_key] = {
+                        'col': _col, 'tab_as': _tab_as_name, 'tab_as_sql': _tab_as_name_sql
+                    }
         else:
             # 列表形式, _id是必须包含的
-            _projection = list(projection)
-            if not is_group_by and '_id' not in _projection:
-                _projection.insert(0, '_id')
+            if not is_group_by and '_id' not in projection:
+                _projection['_id'] = {
+                    'col': '_id', 'tab_as': '_main_tab' if as_name is None else as_name,
+                    'tab_as_sql': '' if as_name is None else ('"%s".' % as_name)
+                }
+
+            for _key in projection:
+                _col, _tab_as_name, _tab_as_name_sql = _get_join_col_info(
+                    _key, left_join, as_name
+                )
+                _projection[_key] = {
+                    'col': _col, 'tab_as': _tab_as_name, 'tab_as_sql': _tab_as_name_sql
+                }
+
+        # 处理fixed_cols参数
+        _fixed_cols_dict = {}
+        if fixed_col_define is not None:
+            # 主表的列参数
+            _tab_as_name = '_main_tab' if as_name is None else as_name
+            _fixed_cols_dict[_tab_as_name] = {
+                'fixed_define': fixed_col_define,
+                'fixed_cols': copy.deepcopy(fixed_col_define.get('cols', []))
+            }
+            _fixed_cols_dict[_tab_as_name]['fixed_cols'].append('_id')
+
+        if left_join is not None:
+            # 关联表的列参数
+            for _join_para in left_join:
+                _join_db_name = _join_para.get('db_name', self._db_name)
+                _join_tab = _join_para['collection']
+                _join_as_name = _join_para.get('as', _join_tab)
+                _fixed_col_define = AsyncTools.sync_run_coroutine(self._get_fixed_col_define(
+                    _join_tab, db_name=_join_db_name, session=session
+                ))
+                if _fixed_col_define is not None:
+                    _fixed_cols_dict[_join_as_name] = {
+                        'fixed_define': _fixed_col_define,
+                        'fixed_cols': copy.deepcopy(_fixed_col_define.get('cols', []))
+                    }
+                    _fixed_cols_dict[_join_as_name]['fixed_cols'].append('_id')
 
         # 生成sql
-        if fixed_col_define is None:
-            # 全部认为是固定字段
-            return ','.join(_projection)
-
-        _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
-        _fixed_cols.append('_id')
         _real_cols = []
-        for _col in _projection:
-            if _col in _fixed_cols:
-                _real_cols.append('"%s"' % _col)
-                continue
+        for _key, _val in _projection.items():
+            _fixed_col_define = _fixed_cols_dict.get(_val['tab_as'], {}).get('fixed_define', None)
+            _fixed_cols = _fixed_cols_dict.get(_val['tab_as'], {}).get('fixed_cols', None)
+            _col = _val['col']
+            _as_name = _val['tab_as_sql']
+            if _fixed_cols is None or _col in _fixed_cols:
+                # 固定字段
+                _real_cols.append(('%s"%s"' % (_as_name, _col)) if _val.get('col_as', None) is None else '%s"%s" as "%s"' % (_as_name, _col, _val['col_as']))
             else:
                 # 其他非固定字段
-                _col_type = fixed_col_define.get('define', {}).get(_col, {}).get('type', 'str')
+                _path_cols = _col.split('.')
+                if len(_path_cols) > 1 and _path_cols[0] in _fixed_cols:
+                    _col_name = _path_cols[0]
+                    _path = self._convert_jsonset_array(_path_cols[1:])
+                else:
+                    _col_name = 'nosql_driver_extend_tags'
+                    _path = self._convert_jsonset_array(_path_cols)
+
+                _col_type = _fixed_col_define.get('define', {}).get(_col, {}).get('type', '')
+                _col_as_name = _col if _val.get('col_as', None) is None else _val['col_as']
+
                 if _col_type == 'str':
                     # 字符串返回, 否则会带双引号
-                    _real_cols.append("nosql_driver_extend_tags->>'%s' as %s" % (_col, _col))
+                    _real_cols.append(
+                        "{tab_as_name}\"{col_name}\"#>>'{{{path}}}' as \"{as_name}\"".format(
+                            path=_path, col_name=_col_name, as_name=_col_as_name, tab_as_name=_as_name
+                        )
+                    )
+                elif _col_type != '':
+                    _real_cols.append(
+                        "cast({tab_as_name}\"{col_name}\"#>'{{{path}}}', as {col_type}) as \"{as_name}\"".format(
+                            path=_path, col_name=_col_name, as_name=_col_as_name, col_type=_col_type, tab_as_name=_as_name
+                        )
+                    )
                 else:
                     _real_cols.append(
-                        "cast(nosql_driver_extend_tags->'%s' as %s) as %s" % (
-                            _col, self._dbtype_cast_mapping[_col_type], _col
+                        "{tab_as_name}\"{col_name}\"#>'{{{path}}}' as \"{as_name}\"".format(
+                            path=_path, col_name=_col_name, as_name=_col_as_name, tab_as_name=_as_name
                         )
                     )
 
@@ -881,7 +1056,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         return ','.join(_real_cols)
 
     def _get_sort_sql(self, sort: list, fixed_col_define: dict = None,
-            sql_paras: list = []) -> str:
+            sql_paras: list = [], left_join: list = None, session=None) -> str:
         """
         获取兼容mongodb查询排序的sql语句
 
@@ -893,23 +1068,69 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
+        @param {list} left_join=None - 左关联配置
+        @param {Any} session=None - 数据库事务连接对象
 
         @returns {str} - 返回更新部分语句sql
         """
-        if fixed_col_define is None:
-            # 全部认为是固定字段
-            _sorts = ['"%s" %s' % (_item[0], 'asc' if _item[1] == 1 else 'desc') for _item in sort]
-        else:
-            _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
-            _fixed_cols.append('_id')
-            _sorts = []
-            for _item in sort:
-                _col = _item[0]
+        _sorts = []
+        # 主表的字段定义参数
+        _main_fixed_cols = None
+        if fixed_col_define is not None:
+            _main_fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
+            _main_fixed_cols.append('_id')
+
+        # 关联表的字段定义列表
+        _fixed_cols_dict = {}
+
+        # 循环处理每个排序参数
+        for _item in sort:
+            # 处理临时参数
+            _col: str = _item[0]
+            if _col[0] != '#':
+                # 属于主表字段
+                _as_name = ''
+                _fixed_cols = _main_fixed_cols
+            else:
+                # 属于关联表字段
+                _index = _col.find('.')
+                _join_para = left_join[int(_col[1: _index])]
+                _col = _col[_index+1:]
+
+                _join_db_name = _join_para.get('db_name', self._db_name)
+                _join_tab = _join_para['collection']
+                _as_name = '"%s".' % _join_para.get('as', _join_tab)
+                if _as_name in _fixed_cols_dict.keys():
+                    _fixed_cols = _fixed_cols_dict.get(_as_name, None)
+                else:
+                    # 重新获取并放入缓存字典
+                    _fixed_col_define = AsyncTools.sync_run_coroutine(self._get_fixed_col_define(
+                        _join_tab, db_name=_join_db_name, session=session
+                    ))
+                    _fixed_cols = copy.deepcopy(_fixed_col_define.get('cols', []))
+                    _fixed_cols.append('_id')
+                    _fixed_cols_dict[_as_name] = _fixed_cols
+
+            # 生成排序sql语句
+            if _fixed_cols is None:
+                # 所有字段认为是固定字段
+                _sorts.append('%s"%s" %s NULLS LAST' % (_as_name, _col, 'asc' if _item[1] == 1 else 'desc'))
+            else:
                 if _col in _fixed_cols:
-                    _sorts.append('"%s" %s' % (_col, 'asc' if _item[1] == 1 else 'desc'))
+                    _sorts.append('%s"%s" %s NULLS LAST' % (_as_name, _col, 'asc' if _item[1] == 1 else 'desc'))
                 else:
                     # 属于扩展字段
-                    _sorts.append("nosql_driver_extend_tags->'%s' %s" % (_col, 'asc' if _item[1] == 1 else 'desc'))
+                    _path_cols = _col.split('.')
+                    if len(_path_cols) > 1 and _path_cols[0] in _fixed_cols:
+                        _col_name = _path_cols[0]
+                        _path = self._convert_jsonset_array(_path_cols[1:])
+                    else:
+                        _col_name = 'nosql_driver_extend_tags'
+                        _path = self._convert_jsonset_array(_path_cols)
+
+                    _sorts.append(
+                        "%s\"%s\"#>'{%s}' %s NULLS LAST" % (_as_name, _col_name, _path, 'asc' if _item[1] == 1 else 'desc')
+                    )
 
         # 返回结果
         return ','.join(_sorts)
@@ -961,19 +1182,22 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                     _col = _col[1:]
                     if _col not in _fixed_cols:
                         # 非固定字段
+                        _path_cols = _col.split('.')
+                        if len(_path_cols) > 1 and _path_cols[0] in _fixed_cols:
+                            _col_name = _path_cols[0]
+                            _path = self._convert_jsonset_array(_path_cols[1:])
+                        else:
+                            _col_name = 'nosql_driver_extend_tags'
+                            _path = self._convert_jsonset_array(_path_cols)
+
                         _col_type = fixed_col_define.get('define', {}).get(_col, {}).get('type', None)
                         if _col_type is None:
-                            # _col = "case when {typeof} = 'number' then cast({tag_val} as number) else {tag_text} end".format(
-                            #     typeof="jsonb_typeof(nosql_driver_extend_tags->'%s')" % _col,
-                            #     tag_val="nosql_driver_extend_tags->'%s'" % _col,
-                            #     tag_text="nosql_driver_extend_tags->>'%s'" % _col
-                            # )
                             # 聚合函数只支持数字类型
-                            _col = "cast(nosql_driver_extend_tags->'%s' as float)" % _col
+                            _col = "cast(\"%s\"#>'{%s}' as float)" % (_col_name, _path)
                         elif _col_type == 'str':
-                            _col = "nosql_driver_extend_tags->>'%s'" % _col
+                            _col = "\"%s\"#>>'{%s}'" % (_col_name, _path)
                         else:
-                            _col = "nosql_driver_extend_tags->'%s'" % _col
+                            _col = "cast(\"%s\"#>'{%s}' as %s)" % (_col_name, _path, _col_type)
                     else:
                         _col = '"%s"' % _col
 
@@ -987,11 +1211,19 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                 _col = _val[1:]
                 if _col not in _fixed_cols:
                     # 非固定字段
-                    _col_type = fixed_col_define.get('define', {}).get(_col, {}).get('type', 'str')
-                    if _col_type == 'str':
-                        _col = "nosql_driver_extend_tags->>'%s'" % _col
+                    _path_cols = _col.split('.')
+                    if len(_path_cols) > 1 and _path_cols[0] in _fixed_cols:
+                        _col_name = _path_cols[0]
+                        _path = self._convert_jsonset_array(_path_cols[1:])
                     else:
-                        _col = "nosql_driver_extend_tags->'%s'" % _col
+                        _col_name = 'nosql_driver_extend_tags'
+                        _path = self._convert_jsonset_array(_path_cols)
+
+                    _col_type = fixed_col_define.get('define', {}).get(_col, {}).get('type', None)
+                    if _col_type == 'str':
+                        _col = "\"%s\"#>>'{%s}'" % (_col_name, _path)
+                    else:
+                        _col = "\"%s\"#>'{%s}'" % (_col_name, _path)
                 else:
                     _col = '"%s"' % _col
 
@@ -1190,6 +1422,73 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             add_partition_sqls.append(_add_partition_sql)
 
         return _partition_sql
+
+    def _get_left_join_sqls(self, db_name: str, collection: str, left_join: list, sql_paras: list = [],
+            session=None, fixed_col_define: dict = None) -> list:
+        """
+        获取左关联的关联表sql清单
+
+        @param {str} db_name - 主表数据库名
+        @param {str} collection - 主表名
+        @param {list} left_join - 左关联配置
+        @param {list} sql_paras=[] - 返回sql对应的占位参数
+        @param {Any} session=None - 数据库事务连接对象
+        @param {dict} fixed_col_define=None - 主表的固定字段配置信息字典
+            {
+                'cols': [],  # 表固定字段名清单
+                'define': {'字段名': {'type': 'str|bool|int|...'}}
+            }
+
+        @returns {list} - 关联表sql清单
+        """
+        _sqls = []
+        # 遍历生成每个表的关联sql
+        for _join_para in left_join:
+            _join_db_name = _join_para.get('db_name', db_name)
+            _join_tab = _join_para['collection']
+            _as_name = _join_para.get('as', _join_tab)
+
+            # 表字段定义
+            _fixed_col_define = {'cols': []} if fixed_col_define is None else fixed_col_define
+            _join_fixed_col_define = AsyncTools.sync_run_coroutine(self._get_fixed_col_define(
+                _join_tab, db_name=_join_db_name, session=session
+            ))
+
+            # on语句
+            _on_fields = []
+            for _on in _join_para['join_fields']:
+                if _on[0] != '_id' and _on[0] not in _fixed_col_define['cols']:
+                    # 扩展字段
+                    _field0 = "\"nosql_driver_extend_tags\"->'%s'" % _on[0]
+                else:
+                    _field0 = '"%s"' % _on[0]
+
+                if _on[1] != '_id' and _on[1] not in _join_fixed_col_define['cols']:
+                    # 扩展字段
+                    _field1 = "\"nosql_driver_extend_tags\"->'%s'" % _on[1]
+                else:
+                    _field1 = '"%s"' % _on[1]
+
+                _on_fields.append('"%s".%s = "%s".%s' % (
+                    collection, _field0, _as_name, _field1
+                ))
+
+            # 根据是否有过滤条件处理
+            _filter = _join_para.get('filter', None)
+            if _filter is None:
+                _sqls.append('"%s"."%s" "%s" on %s' % (
+                    _join_db_name, _join_tab, _as_name, ' and '.join(_on_fields)
+                ))
+            else:
+                # 有过滤条件, 按查询表的方式关联
+                _filter_sql = self._get_filter_sql(
+                    _filter, fixed_col_define=_join_fixed_col_define, sql_paras=sql_paras
+                )
+                _sqls.append('(select * from "%s"."%s" where %s) "%s" on %s' % (
+                    _join_db_name, _join_tab, _filter_sql, _as_name, ' and '.join(_on_fields)
+                ))
+
+        return _sqls
 
     #############################
     # 生成SQL转换的处理函数
@@ -1572,6 +1871,8 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _skip = kwargs.get('skip', None)
         _limit = kwargs.get('limit', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _left_join = kwargs.get('left_join', None)  # 关联查询
+        _session = kwargs.get('session', None)  # 数据库操作的session
         _partition = kwargs.get('partition', None)  # 指定分区表
         if _partition is not None:
             _collection = '%s_%s' % (_collection, _partition)
@@ -1579,7 +1880,8 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         # 处理where条件语句
         _where_sql_paras = []
         _where_sql = self._get_filter_sql(
-            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras
+            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
+            left_join=_left_join, session=_session
         )
 
         # 处理sort语句
@@ -1587,22 +1889,35 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _sort_sql = None
         if _sort is not None:
             _sort_sql = self._get_sort_sql(
-                _sort, fixed_col_define=_fixed_col_define, sql_paras=_sort_sql_paras
+                _sort, fixed_col_define=_fixed_col_define, sql_paras=_sort_sql_paras,
+                left_join=_left_join, session=_session
             )
 
         # 处理projection语句
         _projection_sql_paras = []
         _projection_sql = self._get_projection_sql(
-            _projection, fixed_col_define=_fixed_col_define, sql_paras=_projection_sql_paras
+            _projection, fixed_col_define=_fixed_col_define, sql_paras=_projection_sql_paras,
+            as_name=None if _left_join is None else _collection, left_join=_left_join, session=_session
         )
 
         # 查询表
         _tab = '"%s"."%s"' % (self._db_name, _collection)
 
+        # 处理关联表
+        _left_join_sql_paras = []
+        if _left_join is not None:
+            _left_join_sqls = self._get_left_join_sqls(
+                self._db_name, _collection, _left_join, sql_paras=_left_join_sql_paras,
+                session=_session, fixed_col_define=_fixed_col_define
+            )
+            for _join_sql in _left_join_sqls:
+                _tab = '%s left outer join %s' % (_tab, _join_sql)
+
         # 组装语句
         _sql_paras = []
         _sql = 'select %s from %s' % (_projection_sql, _tab)
         _sql_paras.extend(_projection_sql_paras)
+        _sql_paras.extend(_left_join_sql_paras)
 
         if _where_sql is not None:
             _sql = '%s where %s' % (_sql, _where_sql)
@@ -1635,6 +1950,8 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _skip = kwargs.get('skip', None)
         _limit = kwargs.get('limit', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _left_join = kwargs.get('left_join', None)  # 关联查询
+        _session = kwargs.get('session', None)  # 数据库操作的session
         _partition = kwargs.get('partition', None)  # 指定分区表
         if _partition is not None:
             _collection = '%s_%s' % (_collection, _partition)
@@ -1642,17 +1959,29 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         # 处理where条件语句
         _where_sql_paras = []
         _where_sql = self._get_filter_sql(
-            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras
+            _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
+            left_join=_left_join, session=_session
         )
 
         # 查询表名
         _tab = '"%s"."%s"' % (self._db_name, _collection)
+
+        # 处理关联表
+        _left_join_sql_paras = []
+        if _left_join is not None:
+            _left_join_sqls = self._get_left_join_sqls(
+                self._db_name, _collection, _left_join, sql_paras=_left_join_sql_paras,
+                session=_session, fixed_col_define=_fixed_col_define
+            )
+            for _join_sql in _left_join_sqls:
+                _tab = '%s left outer join %s' % (_tab, _join_sql)
 
         # 组装语句
         if _limit is not None or _skip is not None:
             # 有获取数据区间, 只能采用性能差的子查询模式
             _sql_paras = []
             _sql = 'select 1 from %s' % _tab
+            _sql_paras.extend(_left_join_sql_paras)
             if _where_sql is not None:
                 _sql = '%s where %s' % (_sql, _where_sql)
                 _sql_paras.extend(_where_sql_paras)
@@ -1672,6 +2001,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         else:
             _sql_paras = []
             _sql = 'select count(*) from %s' % _tab
+            _sql_paras.extend(_left_join_sql_paras)
 
             if _where_sql is not None:
                 _sql = '%s where %s' % (_sql, _where_sql)
@@ -1707,6 +2037,21 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
             _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras
         )
 
+        # 处理sort语句
+        _sort_sql_paras = []
+        _sort_sql = None
+        if _sort is not None:
+            _sort_sql = self._get_sort_sql(
+                _sort, fixed_col_define=None, sql_paras=_sort_sql_paras
+            )
+
+        # 处理projection语句
+        _projection_sql_paras = []
+        _projection_sql = self._get_projection_sql(
+            _projection, fixed_col_define=None, sql_paras=_projection_sql_paras,
+            is_group_by=True
+        )
+
         # 查询表名
         _tab = '"%s"."%s"' % (self._db_name, _collection)
 
@@ -1723,21 +2068,6 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
 
         _sql = '%s group by %s' % (_sql, _group_by_sql)
 
-        # 处理sort语句
-        _sort_sql_paras = []
-        _sort_sql = None
-        if _sort is not None:
-            _sort_sql = self._get_sort_sql(
-                _sort, fixed_col_define=None, sql_paras=_sort_sql_paras
-            )
-
-        # 处理projection语句
-        _projection_sql_paras = []
-        _projection_sql = self._get_projection_sql(
-            _projection, fixed_col_define=None, sql_paras=_projection_sql_paras,
-            is_group_by=True
-        )
-
         if _sort_sql is not None:
             # 有排序, 需要包装多一层
             _sql = 'select %s from (%s) t' % (_projection_sql, _sql)
@@ -1745,6 +2075,26 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
 
         # 返回结果
         return ([_sql], None if len(_sql_paras) == 0 else [_sql_paras], {'is_query': True})
+
+    #############################
+    # 其他内部函数
+    #############################
+    def _convert_jsonset_array(self, path_list: list) -> str:
+        """
+        将json查询路径数组转换为pgsql支持的json_set查询路径字符串
+
+        @param {list} path_list - 路径数组
+
+        @returns {str} - 转换后的查询路径字符串
+        """
+        _path = ''
+        for _key in path_list:
+            if ValidateTool.str_is_int(_key):
+                _path = '%s%s' % ('' if _path == '' else '%s, ' % _path, _key)
+            else:
+                _path = '%s"%s"' % ('' if _path == '' else '%s, ' % _path, _key)
+
+        return _path
 
 
 if __name__ == '__main__':

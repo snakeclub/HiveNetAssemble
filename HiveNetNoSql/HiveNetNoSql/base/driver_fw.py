@@ -327,7 +327,9 @@ class NosqlDriverFW(object):
     # 数据查询
     #############################
     async def query_list(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
-            sort: list = None, skip: int = None, limit: int = None, hint: dict = None, session: Any = None, **kwargs) -> list:
+            sort: list = None, skip: int = None, limit: int = None, hint: dict = None,
+            left_join: list = None,
+            session: Any = None, **kwargs) -> list:
         """
         查询记录(直接返回清单)
 
@@ -340,16 +342,37 @@ class NosqlDriverFW(object):
             {'id': {'$gt':50}, '$or': [{'name': 'lhj'},{'title': 'book'}]} :
                 where id > 50 and (name='lhj' or 'title' = 'book')
             {'name': {'$regex': 'likestr'}} : where name like '%likestr%', 正则表达式
+            {'name': {'$in': ['a', 'b', 'c']}} : where name in ('a', 'b', 'c')
+            {'name': {'$nin': ['a', 'b', 'c']}} : where name not in ('a', 'b', 'c')
+            {'col_json.sub_col': 'test'}: 查询json字段的指定字典key, 可以支持多级
+            {'col_json.0': 'test'}: 查询json字段的指定数组索引, 可以支持多级
+            注: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {dict|list} projection=None - 指定结果返回的字段信息
             列表模式: ['col1','col2', ...]  注意: 该模式一定会返回 _id 这个主键
             字典模式: {'_id': False, 'col1': True, ...}  该方式可以通过设置False屏蔽 _id 的返回
-                注意: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+                注1: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+                注2: 可以通过字典模式的值设置为$开头的字段名或json检索路径的方式, 进行字段别名处理, 例如{'as_name': '$real_name'}或{'as_name': '$real_name.key.key'}
+                注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始), 例如{'#0.col1': True, 'as_name': '$#0.col2'}
         @param {list} sort=None - 查询结果的排序方式
-            例: [('col1', 1), ...]  注: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            例: [('col1', 1), ('#0.join_col1', -1)...]
+            注1: 参数的第1个值可以支持'col1.key1'的方式指定json值进行排序
+            注2: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {int} skip=None - 指定跳过返回结果的前面记录的数量
         @param {int} limit=None - 指定限定返回结果记录的数量
         @param {dict} hint=None - 指定查询使用索引的名字清单
             例: {'index_name1': 1, 'index_name2': 1}
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {Any} session=None - 指定事务连接对象
 
         @returns {list} - 返回的结果列表
@@ -358,7 +381,7 @@ class NosqlDriverFW(object):
 
     async def query_iter(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
             sort: list = None, skip: int = None, limit: int = None, hint: dict = None, fetch_each: int = 1,
-            session: Any = None, **kwargs):
+            left_join: list = None, session: Any = None, **kwargs):
         """
         查询记录(通过迭代对象依次返回)
 
@@ -371,16 +394,38 @@ class NosqlDriverFW(object):
             {'id': {$gt:50}, $or: [{'name': 'lhj'},{'title': 'book'}]} :
                 where id > 50 and (name='lhj' or 'title' = 'book')
             {'name': {'$regex': 'likestr'}} : where name like '%likestr%', 正则表达式
+            {'name': {'$in': ['a', 'b', 'c']}} : where name in ('a', 'b', 'c')
+            {'name': {'$nin': ['a', 'b', 'c']}} : where name not in ('a', 'b', 'c')
+            {'col_json.sub_col': 'test'}: 查询json字段的指定字典key, 可以支持多级
+            {'col_json.0': 'test'}: 查询json字段的指定数组索引, 可以支持多级
+            注: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {dict|list} projection=None - 指定结果返回的字段信息
             列表模式: ['col1','col2', ...]  注意: 该模式一定会返回 _id 这个主键
             字典模式: {'_id': False, 'col1': True, ...}  该方式可以通过设置False屏蔽 _id 的返回
+            注1: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+            注2: 可以通过字典模式的值设置为$开头的字段名或json检索路径的方式, 进行字段别名处理, 例如{'as_name': '$real_name'}或{'as_name': '$real_name.key.key'}
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {list} sort=None - 查询结果的排序方式
-            例: [('col1', 1), ...]  注: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            例: [('col1', 1), ('#0.join_col1', -1)...]
+            注1: 参数的第1个值可以支持'col1.key1'的方式指定json值进行排序
+            注2: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {int} skip=None - 指定跳过返回结果的前面记录的数量
         @param {int} limit=None - 指定限定返回结果记录的数量
         @param {dict} hint=None - 指定查询使用索引的名字清单
             例: {'index_name1': 1, 'index_name2': 1}
         @param {int} fetch_each=1 - 每次获取返回的记录数量
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {Any} session=None - 指定事务连接对象
 
         @returns {list} - 返回的结果列表迭代器
@@ -389,7 +434,7 @@ class NosqlDriverFW(object):
 
     async def query_count(self, collection: str, filter: dict = None,
             skip: int = None, limit: int = None, hint: dict = None, overtime: float = None,
-            session: Any = None, **kwargs) -> int:
+            left_join: list = None, session: Any = None, **kwargs) -> int:
         """
         获取匹配查询条件的结果数量
 
@@ -399,6 +444,17 @@ class NosqlDriverFW(object):
         @param {int} limit=None - 指定限定返回结果记录的数量
         @param {dict} hint=None - 指定查询使用索引的名字清单
         @param {float} overtime=None - 指定操作的超时时间, 单位为秒
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {Any} session=None - 指定事务连接对象
 
         @returns {int} - 返回查询条件匹配的记录数
@@ -427,7 +483,7 @@ class NosqlDriverFW(object):
         raise NotImplementedError()
 
     async def query_page_info(self, collection: str, page_size: int = 15, filter: dict = None,
-            hint: dict = None, session: Any = None, **kwargs) -> dict:
+            hint: dict = None, left_join: list = None, session: Any = None, **kwargs) -> dict:
         """
         查询分页信息字典
 
@@ -441,8 +497,20 @@ class NosqlDriverFW(object):
             {'id': {'$gt':50}, '$or': [{'name': 'lhj'},{'title': 'book'}]} :
                 where id > 50 and (name='lhj' or 'title' = 'book')
             {'name': {'$regex': 'likestr'}} : where name like '%likestr%', 正则表达式
+            注: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {dict} hint=None - 指定查询使用索引的名字清单
             例: {'index_name1': 1, 'index_name2': 1}
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {Any} session=None - 指定事务连接对象
 
         @returns {dict} - 返回的分页信息
@@ -454,7 +522,7 @@ class NosqlDriverFW(object):
         """
         # 获取记录总数
         _count = await self.query_count(
-            collection, filter=filter, hint=hint, session=session
+            collection, filter=filter, hint=hint, left_join=left_join, session=session
         )
 
         # 组成返回字典
@@ -466,7 +534,8 @@ class NosqlDriverFW(object):
 
     async def query_page(self, collection: str, page_index: int = 1, page_size: int = 15, filter: dict = None,
             projection: Union[dict, list] = None,
-            sort: list = None, hint: dict = None, session: Any = None, **kwargs) -> list:
+            sort: list = None, hint: dict = None, left_join: list = None,
+            session: Any = None, **kwargs) -> list:
         """
         查询分页记录(直接返回清单)
 
@@ -481,21 +550,40 @@ class NosqlDriverFW(object):
             {'id': {'$gt':50}, '$or': [{'name': 'lhj'},{'title': 'book'}]} :
                 where id > 50 and (name='lhj' or 'title' = 'book')
             {'name': {'$regex': 'likestr'}} : where name like '%likestr%', 正则表达式
+            注: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {dict|list} projection=None - 指定结果返回的字段信息
             列表模式: ['col1','col2', ...]  注意: 该模式一定会返回 _id 这个主键
             字典模式: {'_id': False, 'col1': True, ...}  该方式可以通过设置False屏蔽 _id 的返回
                 注意: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+            注1: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+            注2: 可以通过字典模式的值设置为$开头的字段名或json检索路径的方式, 进行字段别名处理, 例如{'as_name': '$real_name'}或{'as_name': '$real_name.key.key'}
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始), 例如{'#0.col1': True, 'as_name': '$#0.col2'}
         @param {list} sort=None - 查询结果的排序方式
-            例: [('col1', 1), ...]  注: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            例: [('col1', 1), ('#0.join_col1', -1)...]
+            注1: 参数的第1个值可以支持'col1.key1'的方式指定json值进行排序
+            注2: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {dict} hint=None - 指定查询使用索引的名字清单
             例: {'index_name1': 1, 'index_name2': 1}
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {Any} session=None - 指定事务连接对象
 
         @returns {list} - 返回的分页的结果列表
         """
         return await self.query_list(
             collection, filter=filter, projection=projection, sort=sort,
-            skip=(page_index - 1) * page_size, limit=page_size, hint=hint, session=session
+            skip=(page_index - 1) * page_size, limit=page_size, hint=hint,
+            left_join=left_join, session=session
         )
 
     #############################
@@ -1363,7 +1451,9 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
     # 数据查询
     #############################
     async def query_list(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
-            sort: list = None, skip: int = None, limit: int = None, hint: dict = None, session: Any = None, **kwargs) -> list:
+            sort: list = None, skip: int = None, limit: int = None, hint: dict = None,
+            left_join: list = None,
+            session: Any = None, **kwargs) -> list:
         """
         查询记录(直接返回清单)
 
@@ -1376,16 +1466,37 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             {'id': {'$gt':50}, '$or': [{'name': 'lhj'},{'title': 'book'}]} :
                 where id > 50 and (name='lhj' or 'title' = 'book')
             {'name': {'$regex': 'likestr'}} : where name like '%likestr%', 正则表达式
+            {'name': {'$in': ['a', 'b', 'c']}} : where name in ('a', 'b', 'c')
+            {'name': {'$nin': ['a', 'b', 'c']}} : where name not in ('a', 'b', 'c')
+            {'col_json.sub_col': 'test'}: 查询json字段的指定字典key, 可以支持多级
+            {'col_json.0': 'test'}: 查询json字段的指定数组索引, 可以支持多级
+            注: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {dict|list} projection=None - 指定结果返回的字段信息
             列表模式: ['col1','col2', ...]  注意: 该模式一定会返回 _id 这个主键
             字典模式: {'_id': False, 'col1': True, ...}  该方式可以通过设置False屏蔽 _id 的返回
-                注意: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+                注1: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+                注2: 可以通过字典模式的值设置为$开头的字段名或json检索路径的方式, 进行字段别名处理, 例如{'as_name': '$real_name'}或{'as_name': '$real_name.key.key'}
+                注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始), 例如{'#0.col1': True, 'as_name': '$#0.col2'}
         @param {list} sort=None - 查询结果的排序方式
-            例: [('col1', 1), ...]  注: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            例: [('col1', 1), ('#0.join_col1', -1)...]
+            注1: 参数的第1个值可以支持'col1.key1'的方式指定json值进行排序
+            注2: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {int} skip=None - 指定跳过返回结果的前面记录的数量
         @param {int} limit=None - 指定限定返回结果记录的数量
         @param {dict} hint=None - 指定查询使用索引的名字清单
             例: {'index_name1': 1, 'index_name2': 1}
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {Any} session=None - 指定事务连接对象
         @param {list|str} partition=None - MySQL, PostgreSQL专有参数, 指定操作的分区
             注: MySQL支持送入分区列表名, 例如(p1, s3); PostgreSQL仅支持送入单个分区后缀名, 例如'p1'
@@ -1421,7 +1532,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query', collection, filter=_filter, projection=projection, sort=sort,
-                skip=skip, limit=limit, hint=hint, fixed_col_define=_fixed_col_define,
+                skip=skip, limit=limit, hint=hint, left_join=left_join,
+                fixed_col_define=_fixed_col_define, session=session,
                 **kwargs
             )
         )
@@ -1432,7 +1544,8 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         )
 
     async def query_iter(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
-            sort: list = None, skip: int = None, limit: int = None, hint: dict = None, fetch_each: int = 1,
+            sort: list = None, skip: int = None, limit: int = None, hint: dict = None,
+            left_join: list = None, fetch_each: int = 1,
             session: Any = None, **kwargs):
         """
         查询记录(通过迭代对象依次返回)
@@ -1446,16 +1559,38 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             {'id': {$gt:50}, $or: [{'name': 'lhj'},{'title': 'book'}]} :
                 where id > 50 and (name='lhj' or 'title' = 'book')
             {'name': {'$regex': 'likestr'}} : where name like '%likestr%', 正则表达式
+            {'name': {'$in': ['a', 'b', 'c']}} : where name in ('a', 'b', 'c')
+            {'name': {'$nin': ['a', 'b', 'c']}} : where name not in ('a', 'b', 'c')
+            {'col_json.sub_col': 'test'}: 查询json字段的指定字典key, 可以支持多级
+            {'col_json.0': 'test'}: 查询json字段的指定数组索引, 可以支持多级
+            注: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {dict|list} projection=None - 指定结果返回的字段信息
             列表模式: ['col1','col2', ...]  注意: 该模式一定会返回 _id 这个主键
             字典模式: {'_id': False, 'col1': True, ...}  该方式可以通过设置False屏蔽 _id 的返回
+            注1: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+            注2: 可以通过字典模式的值设置为$开头的字段名或json检索路径的方式, 进行字段别名处理, 例如{'as_name': '$real_name'}或{'as_name': '$real_name.key.key'}
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始), 例如{'#0.col1': True, 'as_name': '$#0.col2'}
         @param {list} sort=None - 查询结果的排序方式
-            例: [('col1', 1), ...]  注: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            例: [('col1', 1), ('#0.join_col1', -1)...]
+            注1: 参数的第1个值可以支持'col1.key1'的方式指定json值进行排序
+            注2: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {int} skip=None - 指定跳过返回结果的前面记录的数量
         @param {int} limit=None - 指定限定返回结果记录的数量
         @param {dict} hint=None - 指定查询使用索引的名字清单
             例: {'index_name1': 1, 'index_name2': 1}
         @param {int} fetch_each=1 - 每次获取返回的记录数量
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {Any} session=None - 指定事务连接对象
         @param {list|str} partition=None - MySQL, PostgreSQL专有参数, 指定操作的分区
             注: MySQL支持送入分区列表名, 例如(p1, s3); PostgreSQL仅支持送入单个分区后缀名, 例如'p1'
@@ -1491,7 +1626,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             self._generate_sqls(
                 'query', collection, filter=_filter, projection=projection, sort=sort,
                 skip=skip, limit=limit, hint=hint, fixed_col_define=_fixed_col_define,
-                **kwargs
+                left_join=left_join, session=session, **kwargs
             )
         )
         _execute_is_query = _execute_paras.get('is_query', True)
@@ -1576,7 +1711,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
     async def query_count(self, collection: str, filter: dict = None,
             skip: int = None, limit: int = None, hint: dict = None, overtime: float = None,
-            session: Any = None, **kwargs) -> int:
+            left_join: list = None, session: Any = None, **kwargs) -> int:
         """
         获取匹配查询条件的结果数量
 
@@ -1586,6 +1721,17 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         @param {int} limit=None - 指定限定返回结果记录的数量
         @param {dict} hint=None - 指定查询使用索引的名字清单
         @param {float} overtime=None - 指定操作的超时时间, 单位为秒
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {Any} session=None - 指定事务连接对象
         @param {list|str} partition=None - MySQL, PostgreSQL专有参数, 指定操作的分区
             注: MySQL支持送入分区列表名, 例如(p1, s3); PostgreSQL仅支持送入单个分区后缀名, 例如'p1'
@@ -1621,7 +1767,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
             self._generate_sqls(
                 'query_count', collection, filter=_filter, skip=skip, limit=limit, hint=hint,
-                fixed_col_define=_fixed_col_define, **kwargs
+                fixed_col_define=_fixed_col_define, left_join=left_join, **kwargs
             )
         )
 
@@ -1774,20 +1920,22 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
     #############################
     # 内部函数
     #############################
-    async def _get_fixed_col_define(self, collection: str, session: Any = None) -> dict:
+    async def _get_fixed_col_define(self, collection: str, db_name: str = None, session: Any = None) -> dict:
         """
         获取制定集合(表)的固定字段定义信息
 
         @param {str} collection - 集合名(表)
+        @param {str} db_name=None - 数据库名(不指定代表默认当前数据库)
         @param {Any} session=None - 指定事务连接对象
 
         @returns {dict} - 返回固定信息字典
         """
-        _fixed_col_define = self._fixed_col_define.get(self._db_name, {}).get(collection, None)
+        _db_name = self._db_name if db_name is None else db_name
+        _fixed_col_define = self._fixed_col_define.get(_db_name, {}).get(collection, None)
         if _fixed_col_define is None:
             # 尝试查询数据库获取
             _cols_define = await AsyncTools.async_run_coroutine(
-                self._get_cols_info(collection, session=session)
+                self._get_cols_info(collection, db_name=db_name, session=session)
             )
             _fixed_col_define = {'cols': [], 'define': {}}
             for _info in _cols_define:
@@ -1799,10 +1947,10 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
             # 添加到数据表的字段信息字典缓存
             if len(_cols_define) > 0:
-                if self._db_name not in self._fixed_col_define.keys():
-                    self._fixed_col_define[self._db_name] = {}
+                if _db_name not in self._fixed_col_define.keys():
+                    self._fixed_col_define[_db_name] = {}
 
-                self._fixed_col_define[self._db_name][collection] = _fixed_col_define
+                self._fixed_col_define[_db_name][collection] = _fixed_col_define
 
         return _fixed_col_define
 
@@ -1977,6 +2125,28 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             if _close_conn:
                 await AsyncTools.async_run_coroutine(_conn.close())
 
+    async def _cursor_description_to_col_index(self, cursor_description) -> list:
+        """
+        将游标描述转换为对应的列名列表
+        """
+        _col_index = []
+        for _tup in cursor_description:
+            _col_name = _tup[0]
+            _copy_index = 0
+            if _col_name == 'nosql_driver_extend_tags' or _col_name not in _col_index:
+                _col_index.append(_col_name)
+            else:
+                while True:
+                    _copy_index += 1
+                    _copy_name = '%s_%d' % (_col_name, _copy_index)
+                    if _copy_name in _col_index:
+                        continue
+                    else:
+                        _col_index.append(_copy_name)
+                        break
+
+        return _col_index
+
     async def _rows_to_dict(self, col_index: list, rows: list) -> list:
         """
         将查询结果数组转换为字典数组
@@ -1998,12 +2168,23 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             _formated_row = await AsyncTools.async_run_coroutine(self._format_row_value(_row))
             for _i in range(len(col_index)):
                 if _formated_row[_i] is not None:
-                    _dict[col_index[_i]] = _formated_row[_i]
-
-            if 'nosql_driver_extend_tags' in col_index:
-                # 扩展字段放回字典的第一层
-                _extend = _dict.pop('nosql_driver_extend_tags')
-                _dict.update(_extend)
+                    if col_index[_i] == 'nosql_driver_extend_tags':
+                        # 扩展字段, 放回第一层
+                        for _col, _val in _formated_row[_i].items():
+                            if _dict.get(_col, None) is None:
+                                _dict[_col] = _val
+                            else:
+                                _copy_index = 0
+                                while True:
+                                    _copy_index += 1
+                                    _copy_name = '%s_%d' % (_col, _copy_index)
+                                    if _dict.get(_copy_name, None) is None:
+                                        _dict[_copy_name] = _val
+                                        break
+                                    else:
+                                        continue
+                    else:
+                        _dict[col_index[_i]] = _formated_row[_i]
 
             _dict_list.append(_dict)
 
@@ -2066,7 +2247,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
             if is_query:
                 # 查询语句, 一次性返回查询结果
-                _col_index = [_tup[0] for _tup in _cursor.description]
+                _col_index = await self._cursor_description_to_col_index(_cursor.description)
                 _rows = await AsyncTools.async_run_coroutine(_cursor.fetchall())
                 # 转换为字典形式并返回
                 _ret = await self._rows_to_dict(_col_index, _rows)
@@ -2149,7 +2330,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
                 await AsyncTools.async_run_coroutine(_cursor.execute(sql, paras))
 
             # 查询语句, 分批次返回查询结果
-            _col_index = [_tup[0] for _tup in _cursor.description]
+            _col_index = await self._cursor_description_to_col_index(_cursor.description)
             while True:
                 _rows = await AsyncTools.async_run_coroutine(_cursor.fetchmany(fetch_each))
                 if _rows is None or len(_rows) == 0:
@@ -2290,11 +2471,12 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         """
         pass
 
-    async def _get_cols_info(self, collection: str, session: Any = None) -> list:
+    async def _get_cols_info(self, collection: str, db_name: str = None, session: Any = None) -> list:
         """
         获取制定集合(表)的列信息(同步或异步函数)
 
         @param {str} collection - 集合名(表)
+        @param {str} db_name=None - 数据库名(不指定代表默认当前数据库)
         @param {Any} session=None - 指定事务连接对象
 
         @returns {list} - 字典形式的列信息数组, 注意列名为name, 类型为type(类型应为标准类型: str, int, float, bool, json)

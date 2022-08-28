@@ -501,6 +501,7 @@ class MongoNosqlDriver(NosqlDriverFW):
     #############################
     async def query_list(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
             sort: list = None, skip: int = None, limit: int = None, hint: dict = None,
+            left_join: list = None,
             session: Any = None, **kwargs) -> list:
         """
         查询记录(直接返回清单)
@@ -514,36 +515,81 @@ class MongoNosqlDriver(NosqlDriverFW):
             {'id': {'$gt':50}, '$or': [{'name': 'lhj'},{'title': 'book'}]} :
                 where id > 50 and (name='lhj' or 'title' = 'book')
             {'name': {'$regex': 'likestr'}} : where name like '%likestr%', 正则表达式
+            {'name': {'$in': ['a', 'b', 'c']}} : where name in ('a', 'b', 'c')
+            {'name': {'$nin': ['a', 'b', 'c']}} : where name not in ('a', 'b', 'c')
+            {'col_json.sub_col': 'test'}: 查询json字段的指定字典key, 可以支持多级
+            {'col_json.0': 'test'}: 查询json字段的指定数组索引, 可以支持多级
+            注: 如果条件中涉及_id字段, 应传入ObjectId对象, 例如传入ObjectId('...')
+            注: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {dict|list} projection=None - 指定结果返回的字段信息
             列表模式: ['col1','col2', ...]  注意: 该模式一定会返回 _id 这个主键
             字典模式: {'_id': False, 'col1': True, ...}  该方式可以通过设置False屏蔽 _id 的返回
-                注意: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+                注1: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+                注2: 可以通过字典模式的值设置为$开头的字段名或json检索路径的方式, 进行字段别名处理, 例如{'as_name': '$real_name'}或{'as_name': '$real_name.key.key'}
+                注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始), 例如{'#0.col1': True, 'as_name': '$#0.col2'}
+                注4: mongo的别名形式, 不支持数组索引
         @param {list} sort=None - 查询结果的排序方式
             例: [('col1', 1), ...]  注: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            注1: 参数的第1个值可以支持'col1.key1'的方式指定json值进行排序
+            注2: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {int} skip=None - 指定跳过返回结果的前面记录的数量
         @param {int} limit=None - 指定限定返回结果记录的数量
         @param {dict} hint=None - 指定查询使用索引的名字清单
             例: {'index_name1': 1, 'index_name2': 1}
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {Any} session=None - 指定事务连接对象
 
         @returns {list} - 返回的结果列表
         """
-        self._std_filter(filter)  # 标准化filter字典
-        _kwargs = {}
-        if skip is not None:
-            _kwargs['skip'] = skip
-        if limit is not None:
-            _kwargs['limit'] = limit
-        if hint is not None:
-            _kwargs['hint'] = hint
+        if left_join is None:
+            # 单集合查询, 使用find函数处理
+            self._std_filter(filter)  # 标准化filter字典
+            _kwargs = {}
+            if skip is not None:
+                _kwargs['skip'] = skip
+            if limit is not None:
+                _kwargs['limit'] = limit
+            if hint is not None:
+                _kwargs['hint'] = hint
 
-        _cursor = self._db.get_collection(collection).find(
-            filter=filter, projection=projection, sort=sort, session=session, **_kwargs
-        )
-        return await _cursor.to_list(None)
+            _cursor = self._db.get_collection(collection).find(
+                filter=filter, projection=projection, sort=sort, session=session, **_kwargs
+            )
+            return await _cursor.to_list(None)
+        else:
+            # 联合查询, 使用聚合管道aggregate方式执行
+            _kwargs = {
+                'allowDiskUse': True
+            }  # 聚合管道运行参数
+            if hint is not None:
+                _kwargs['hint'] = hint
+
+            _pipeline = self._get_left_join_aggregate(
+                filter=filter, projection=projection, sort=sort, skip=skip, limit=limit,
+                hint=hint, left_join=left_join
+            )
+
+            # 执行管道
+            _cursor = self._db.get_collection(collection).aggregate(
+                _pipeline, session=session, **_kwargs
+            )
+            _ret = await _cursor.to_list(None)
+            return self._std_left_join_result(_ret, left_join=left_join)
 
     async def query_iter(self, collection: str, filter: dict = None, projection: Union[dict, list] = None,
-            sort: list = None, skip: int = None, limit: int = None, hint: dict = None, fetch_each: int = 1,
+            sort: list = None, skip: int = None, limit: int = None, hint: dict = None,
+            left_join: list = None, fetch_each: int = 1,
             session: Any = None, **kwargs):
         """
         查询记录(通过迭代对象依次返回)
@@ -552,47 +598,99 @@ class MongoNosqlDriver(NosqlDriverFW):
         @param {dict} filter=None - 查询条件字典, 与mongodb的查询条件设置方法一样, 参考如下:
             {} : 查询全部记录
             {'id': 'info', 'ver': '0.0.1'} : where id = 'info' and 'ver' = '0.0.1'
-            {'ver': {$lt: '0.0.1'}} : where ver < '0.0.1'
+            {'ver': {'$lt': '0.0.1'}} : where ver < '0.0.1'
                 注: $lt - 小于, $lte - 小于或等于, $gt - 大于, $gte - 大于或等于, $ne - 不等于
-            {'id': {$gt:50}, $or: [{'name': 'lhj'},{'title': 'book'}]} :
+            {'id': {'$gt':50}, '$or': [{'name': 'lhj'},{'title': 'book'}]} :
                 where id > 50 and (name='lhj' or 'title' = 'book')
             {'name': {'$regex': 'likestr'}} : where name like '%likestr%', 正则表达式
+            {'name': {'$in': ['a', 'b', 'c']}} : where name in ('a', 'b', 'c')
+            {'name': {'$nin': ['a', 'b', 'c']}} : where name not in ('a', 'b', 'c')
+            {'col_json.sub_col': 'test'}: 查询json字段的指定字典key, 可以支持多级
+            {'col_json.0': 'test'}: 查询json字段的指定数组索引, 可以支持多级
+            注: 如果条件中涉及_id字段, 应传入ObjectId对象, 例如传入ObjectId('...')
+            注: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {dict|list} projection=None - 指定结果返回的字段信息
             列表模式: ['col1','col2', ...]  注意: 该模式一定会返回 _id 这个主键
             字典模式: {'_id': False, 'col1': True, ...}  该方式可以通过设置False屏蔽 _id 的返回
+                注1: 只有 _id 字段可以设置为False, 其他字段不可设置为False(如果要屏蔽可以不放入字典)
+                注2: 可以通过字典模式的值设置为$开头的字段名或json检索路径的方式, 进行字段别名处理, 例如{'as_name': '$real_name'}或{'as_name': '$real_name.key.key'}
+                注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始), 例如{'#0.col1': True, 'as_name': '$#0.col2'}
+                注4: mongo的别名形式, 不支持数组索引
         @param {list} sort=None - 查询结果的排序方式
             例: [('col1', 1), ...]  注: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            注1: 参数的第1个值可以支持'col1.key1'的方式指定json值进行排序
+            注2: 参数的第2个值指定是否升序(1为升序, -1为降序)
+            注3: 可以在字段名前面加 "#序号." 用于与left_join参数配合使用, 指定当前排序字段所属的关联表索引(序号从0开始)
         @param {int} skip=None - 指定跳过返回结果的前面记录的数量
         @param {int} limit=None - 指定限定返回结果记录的数量
         @param {dict} hint=None - 指定查询使用索引的名字清单
             例: {'index_name1': 1, 'index_name2': 1}
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {int} fetch_each=1 - 每次获取返回的记录数量
         @param {Any} session=None - 指定事务连接对象
 
         @returns {list} - 返回的结果列表
         """
-        self._std_filter(filter)  # 标准化filter字典
-        _kwargs = {}
-        if skip is not None:
-            _kwargs['skip'] = skip
-        if limit is not None:
-            _kwargs['limit'] = limit
-        if hint is not None:
-            _kwargs['hint'] = hint
+        if left_join is None:
+            # 单集合查询, 使用find函数处理
+            self._std_filter(filter)  # 标准化filter字典
+            _kwargs = {}
+            if skip is not None:
+                _kwargs['skip'] = skip
+            if limit is not None:
+                _kwargs['limit'] = limit
+            if hint is not None:
+                _kwargs['hint'] = hint
 
-        _cursor = self._db.get_collection(collection).find(
-            filter=filter, projection=projection, sort=sort, session=session, **_kwargs
-        )
-        _fetchs = await _cursor.to_list(fetch_each)
-        while _fetchs:
-            # 返回当次结果
-            yield _fetchs
-
-            # 返回下一次结果
+            _cursor = self._db.get_collection(collection).find(
+                filter=filter, projection=projection, sort=sort, session=session, **_kwargs
+            )
             _fetchs = await _cursor.to_list(fetch_each)
+            while _fetchs:
+                # 返回当次结果
+                yield _fetchs
+
+                # 返回下一次结果
+                _fetchs = await _cursor.to_list(fetch_each)
+        else:
+            # 联合查询, 使用聚合管道aggregate方式执行
+            _kwargs = {
+                'allowDiskUse': True
+            }  # 聚合管道运行参数
+            if hint is not None:
+                _kwargs['hint'] = hint
+
+            _pipeline = self._get_left_join_aggregate(
+                filter=filter, projection=projection, sort=sort, skip=skip, limit=limit,
+                hint=hint, left_join=left_join
+            )
+
+            # 执行管道
+            _cursor = self._db.get_collection(collection).aggregate(
+                _pipeline, session=session, **_kwargs
+            )
+
+            _fetchs = await _cursor.to_list(fetch_each)
+            while _fetchs:
+                # 返回当次结果
+                yield self._std_left_join_result(_fetchs, left_join=left_join)
+
+                # 返回下一次结果
+                _fetchs = await _cursor.to_list(fetch_each)
 
     async def query_count(self, collection: str, filter: dict = None,
-            skip: int = None, limit: int = None, hint: dict = None, overtime: float = None,
+            skip: int = None, limit: int = None, hint: dict = None, left_join: list = None,
+            overtime: float = None,
             session: Any = None, **kwargs) -> int:
         """
         获取匹配查询条件的结果数量
@@ -602,25 +700,62 @@ class MongoNosqlDriver(NosqlDriverFW):
         @param {int} skip=None - 指定跳过返回结果的前面记录的数量
         @param {int} limit=None - 指定限定返回结果记录的数量
         @param {dict} hint=None - 指定查询使用索引的名字清单
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表, 格式如下:
+            [
+                {
+                    'db_name': '指定集合的db',  # 如果不设置则代表和主表是同一个数据库
+                    'collection': '要关联的集合(表)名',
+                    'as': '关联后的别名',  # 如果不设置默认为集合名
+                    'join_fields': [(主表字段名, 关联表字段名), ...],  # 要关联的字段列表, 仅支持完全相等的关联条件
+                    'filter': ..., # 关联表数据的过滤条件(仅用于内部过滤需要关联的数据), 注意字段无需添加集合的别名
+                },
+                ...
+            ]
         @param {float} overtime=None - 指定操作的超时时间, 单位为秒
         @param {Any} session=None - 指定事务连接对象
 
         @returns {int} - 返回查询条件匹配的记录数
         """
-        self._std_filter(filter)  # 标准化filter字典
-        _kwargs = {}
-        if skip is not None:
-            _kwargs['skip'] = skip
-        if limit is not None:
-            _kwargs['limit'] = limit
-        if hint is not None:
-            _kwargs['hint'] = hint
-        if overtime is not None:
-            _kwargs['maxTimeMS'] = overtime * 1000
+        if left_join is None:
+            # 单集合查询, 使用count_documents函数处理
+            self._std_filter(filter)  # 标准化filter字典
+            _kwargs = {}
+            if skip is not None:
+                _kwargs['skip'] = skip
+            if limit is not None:
+                _kwargs['limit'] = limit
+            if hint is not None:
+                _kwargs['hint'] = hint
+            if overtime is not None:
+                _kwargs['maxTimeMS'] = overtime * 1000
 
-        return await self._db.get_collection(collection).count_documents(
-            {} if filter is None else filter, session=session, **_kwargs
-        )
+            return await self._db.get_collection(collection).count_documents(
+                {} if filter is None else filter, session=session, **_kwargs
+            )
+        else:
+            # 联合查询, 使用聚合管道aggregate方式执行
+            _kwargs = {
+                'allowDiskUse': True
+            }  # 聚合管道运行参数
+            if overtime is not None:
+                _kwargs['maxTimeMS'] = overtime * 1000
+            if hint is not None:
+                _kwargs['hint'] = hint
+
+            _pipeline = self._get_left_join_aggregate(
+                filter=filter, projection=None, sort=None, skip=skip, limit=limit,
+                hint=hint, left_join=left_join
+            )
+
+            # 统计文档数量
+            _pipeline.append({'$count': 'docs_count'})
+
+            # 执行管道
+            _cursor = self._db.get_collection(collection).aggregate(
+                _pipeline, session=session, **_kwargs
+            )
+            _ret = await _cursor.to_list(None)
+            return _ret[0]['docs_count']
 
     async def query_group_by(self, collection: str, group: dict = None, filter: dict = None,
             projection: Union[dict, list] = None, sort: list = None,
@@ -768,9 +903,313 @@ class MongoNosqlDriver(NosqlDriverFW):
         @param {dict} filter - 查询条件字典
         """
         if filter is None:
-            return
+            return filter
 
         _id = filter.get('_id', None)
-        if _id is not None and type(_id) == str:
-            # 需要转换为ObjectId
-            filter['_id'] = ObjectId(_id)
+        if _id is not None:
+            _type = type(_id)
+            if _type == str:
+                # 需要转换为ObjectId
+                filter['_id'] = ObjectId(_id)
+            elif _type == dict:
+                if filter['_id'].get('$in', None) is not None:
+                    filter['_id']['$in'] = [ObjectId(_temp_id) for _temp_id in filter['_id']['$in']]
+
+                if filter['_id'].get('$nin', None) is not None:
+                    filter['_id']['$nin'] = [ObjectId(_temp_id) for _temp_id in filter['_id']['$nin']]
+
+        return filter
+
+    def _split_filter(self, filter: dict, left_join: list) -> tuple:
+        """
+        分离主表和关联表的过滤条件
+
+        @param {dict} filter - 过滤条件
+        @param {list} left_join - 指定左关联(left outer join)集合信息
+
+        @returns {tuple} - (主表过滤条件, 关联表过滤条件)
+        """
+        if filter is None:
+            return {}, {}
+
+        _main_filter = {}
+        _join_filter = {}
+        for _key, _val in filter.items():
+            _is_join, _std_key, _std_val = self._check_and_std_filter(_key, _val, left_join)
+            if _is_join:
+                # 是关联表
+                _join_filter[_std_key] = _std_val
+            else:
+                _main_filter[_std_key] = _std_val
+
+        return _main_filter, _join_filter
+
+    def _check_and_std_filter(self, filter_key: str, filter_val, left_join: list,
+            upper_ret: bool = False) -> tuple:
+        """
+        检查过滤条件是否关联表条件, 以及进行过滤条件的标准化处理
+
+        @param {str} filter_key - 过滤条件的key
+        @param {Any} filter_val - 过滤条件的值
+        @param {list} left_join - 指定左关联(left outer join)集合信息
+        @param {bool} upper_ret=False - 上级的检查结果
+
+        @returns {tuple} - (是否关联表条件, 标准化后的key, 标准化后的值)
+        """
+        _upper_ret = upper_ret  # 以传入结果的为准
+        _std_key = filter_key  # 标准化后的key
+        _std_val = filter_val  # 标准化后的val
+
+        # 解析真正的值
+        if filter_key[0] == '#':
+            _upper_ret = True
+            _index = filter_key.find('.')
+            _join_para = left_join[int(filter_key[1: _index])]
+            _col = filter_key[_index+1:]
+            _std_key = '%s.%s' % (_join_para.get('as', _join_para['collection']), _col)
+        else:
+            _col = filter_key
+
+        # _id字段的处理
+        if _col == '_id':
+            _type = type(_std_val)
+            if _type == str:
+                _std_val = ObjectId(_std_val)
+            elif _type == dict:
+                if _std_val.get('$in', None) is not None:
+                    _std_val['$in'] = [ObjectId(_temp_id) for _temp_id in _std_val['$in']]
+
+                if _std_val.get('$nin', None) is not None:
+                    _std_val['$nin'] = [ObjectId(_temp_id) for _temp_id in _std_val['$nin']]
+
+            return _upper_ret, _std_key, _std_val
+
+        # 判断其他情况
+        if _col == '$or':
+            # 只有or的情况才会有子查询
+            _temp_std_val = []
+            for _or_filter in _std_val:
+                _temp_filter = {}
+                for _key, _val in _or_filter.items():
+                    _temp_upper_ret, _temp_key, _temp_val = self._check_and_std_filter(
+                        _key, _val, left_join, upper_ret=_upper_ret
+                    )
+                    _upper_ret = _temp_upper_ret
+                    _temp_filter[_temp_key] = _temp_val
+
+                _temp_std_val.append(_temp_filter)
+
+            _std_val = _temp_std_val
+
+        # 返回结果
+        return _upper_ret, _std_key, _std_val
+
+    def _std_sort(self, sort: list, left_join: list) -> dict:
+        """
+        标准化排序参数
+
+        @param {list} sort - 查询结果的排序方式
+        @param {list} left_join - 指定左关联(left outer join)集合信息
+
+        @returns {dict} - 标准化后的排序参数
+        """
+        _sort = {}
+        for _para in sort:
+            if _para[0][0] == '#':
+                _index = _para[0].find('.')
+                _join_para = left_join[int(_para[0][1: _index])]
+                _col = _para[0][_index+1:]
+                _sort['%s.%s' % (_join_para.get('as', _join_para['collection']), _col)] = _para[1]
+            else:
+                _sort[_para[0]] = _para[1]
+
+        return _sort
+
+    def _std_project(self, project: Union[dict, list], left_join: list):
+        """
+        标准化返回字段参数
+
+        @param {dict|list} project - 指定结果返回的字段信息
+        @param {list} left_join - 指定左关联(left outer join)集合信息, 每个数组为一个关联表
+
+        @returns {dict|list} - 标准化后的返回字段参数
+        """
+        # 无返回配置，全部字段返回
+        if project is None:
+            return None
+
+        # 处理联表字段的函数
+        def _get_col_info(col: str, left_join) -> tuple:
+            if col[0] == '#':
+                _index = col.find('.')
+                _join_para = left_join[int(col[1: _index])]
+                _col = col[_index+1:]
+                _tab_as_name = '%s.' % _join_para.get('as', _join_para['collection'])
+            else:
+                _col = col
+                _tab_as_name = ''
+
+            return _col, _tab_as_name
+
+        _project = {}
+        if type(project) == dict:
+            # 字典形式
+            for _key, _show in project.items():
+                if type(_show) == str and _show[0] == '$':
+                    # as模式
+                    _real_col, _tab_as_name = _get_col_info(_show[1:], left_join)
+                    _project['%s%s' % (_tab_as_name, _key)] = '$%s%s' % (_tab_as_name, _real_col)
+                elif _key == '_id':
+                    _project['_id'] = _show
+                elif _show:
+                    # 除主表_id外不能为False
+                    _real_col, _tab_as_name = _get_col_info(_key, left_join)
+                    _project['%s%s' % (_tab_as_name, _real_col)] = _show
+        else:
+            # 列表形式
+            for _item in project:
+                _real_col, _tab_as_name = _get_col_info(_item, left_join)
+                _project['%s%s' % (_tab_as_name, _real_col)] = True
+
+        return _project
+
+    def _get_left_join_aggregate(self, filter: dict = None, projection: Union[dict, list] = None,
+            sort: list = None, skip: int = None, limit: int = None, hint: dict = None,
+            left_join: list = None) -> list:
+        """
+        生成关联表模式的聚合管道运行参数
+
+        @param {dict} filter=None - 查询条件字典, 与mongodb的查询条件设置方法一样
+        @param {dict|list} projection=None - 指定结果返回的字段信息
+        @param {list} sort=None - 查询结果的排序方式
+        @param {int} skip=None - 指定跳过返回结果的前面记录的数量
+        @param {int} limit=None - 指定限定返回结果记录的数量
+        @param {dict} hint=None - 指定查询使用索引的名字清单
+        @param {list} left_join=None - 指定左关联(left outer join)集合信息, 每个数组为一个关联表
+
+        @returns {list} - 聚合管道参数
+        """
+        _pipeline = []  # 组装执行的管道
+
+        # 分离和标准化过滤条件, 将主表和关联表的过滤条件拆成两个, 分别放在最开始和最后进行过滤
+        _main_filter, _join_filter = self._split_filter(filter, left_join)
+
+        # 主表的过滤条件
+        if len(_main_filter) > 0:
+            _pipeline.append({'$match': _main_filter})
+
+        # 处理关联
+        if left_join is not None:
+            for _join_para in left_join:
+                _as_name = _join_para['collection'] if _join_para.get('as', None) is None else _join_para['as']
+                _sub_pipeline = []  # 子聚合管道
+
+                # 关联表过滤条件
+                if _join_para.get('filter', None) is not None:
+                    _sub_pipeline.append({
+                        '$match': self._std_filter(_join_para['filter'])
+                    })
+
+                # 关联字段处理
+                _let = {}
+                _match = []
+                for _join_field in _join_para['join_fields']:
+                    _let['main_tab_%s' % _join_field[0]] = '$%s' % _join_field[0]
+                    _match.append({
+                        '$eq': ['$%s' % _join_field[1], '$$main_tab_%s' % _join_field[0]]
+                    })
+
+                # 通过匹配关联多字段
+                _sub_pipeline.append({
+                    '$match': {'$expr': {'$and': _match}}
+                })
+
+                # 指定集合
+                if _join_para.get('db_name', None) is None:
+                    _from = _join_para['collection']
+                else:
+                    _from = {'db': _join_para['db_name'], 'coll': _join_para['collection']}
+
+                _step = {
+                    '$lookup': {
+                        # 指定集合
+                        'from': _from,
+                        # 设置主表关联字段为变量
+                        'let': _let,
+                        'pipeline': _sub_pipeline,
+                        'as': _as_name
+                    }
+                }
+
+                # 添加到主管道
+                _pipeline.append(_step)
+
+                # 展开关联到的关联表数组, 空数组的情况保留主表值
+                _pipeline.append({'$unwind': {'path': '$%s' % _as_name, 'preserveNullAndEmptyArrays': True}})
+
+        # 带关联表的过滤条件
+        if len(_join_filter) > 0:
+            _pipeline.append({'$match': _join_filter})
+
+        # 排序处理
+        if sort is not None:
+            _pipeline.append({
+                '$sort': self._std_sort(sort, left_join)
+            })
+
+        # 返回字段处理: {'id': 0} - 显示所有字段, 排除id; {'id': True} - 只显示id字段，排除其他所有字段
+        _project = self._std_project(projection, left_join)
+        if _project is not None:
+            _pipeline.append({'$project': _project})
+
+        # 其他处理
+        if skip is not None:
+            _pipeline.append({'$skip': skip})
+
+        if limit is not None:
+            _pipeline.append({'$limit': limit})
+
+        # 返回结果
+        return _pipeline
+
+    def _std_left_join_result(self, result: list, left_join: list = None) -> list:
+        """
+        标准化关联表返回的结果
+
+        @param {list} result - 返回的结果列表
+        @param {list} left_join - 指定左关联(left outer join)集合信息, 每个数组为一个关联表
+
+        @returns {list} - 标准化后的结果
+        """
+        if left_join is None:
+            return result
+
+        # 获取联表as_name的清单
+        _as_names = []
+        for _join_para in left_join:
+            _as_names.append(_join_para.get('as', _join_para['collection']))
+
+        # 逐个处理结果
+        for _i in range(len(result)):
+            for _as_name in _as_names:
+                _join_ret = result[_i].pop(_as_name, None)
+                if _join_ret is None:
+                    continue
+
+                # 逐个字段放到顶层
+                for _key, _val in _join_ret.items():
+                    if result[_i].get(_key, None) is None:
+                        result[_i][_key] = _val
+                    else:
+                        _copy_index = 0
+                        while True:
+                            _copy_index += 1
+                            _copy_name = '%s_%d' % (_key, _copy_index)
+                            if result[_i].get(_copy_name, None) is None:
+                                result[_i][_copy_name] = _val
+                                break
+                            else:
+                                continue
+
+        # 返回结果
+        return result

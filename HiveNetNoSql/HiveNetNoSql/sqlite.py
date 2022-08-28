@@ -21,6 +21,7 @@ import json
 from bson.objectid import ObjectId
 from HiveNetCore.utils.run_tool import AsyncTools
 from HiveNetCore.utils.string_tool import StringTool
+from HiveNetCore.utils.validate_tool import ValidateTool
 from HiveNetCore.connection_pool import PoolConnectionFW
 # 自动安装依赖库
 from HiveNetCore.utils.pyenv_tool import PythonEnvTools
@@ -316,11 +317,12 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         # 注入正则表达式的支持函数
         AsyncTools.sync_run_coroutine(conn.create_function("REGEXP", 2, self._regexp))
 
-    async def _get_cols_info(self, collection: str, session: Any = None) -> list:
+    async def _get_cols_info(self, collection: str, db_name: str = None, session: Any = None) -> list:
         """
         获取制定集合(表)的列信息
 
         @param {str} collection - 集合名(表)
+        @param {str} db_name=None - 数据库名(不指定代表默认当前数据库)
         @param {Any} session=None - 指定事务连接对象
 
         @returns {list} - 字典形式的列信息数组, 注意列名为name, 类型为type(类型应为标准类型: str, int, float, bool, json)
@@ -333,7 +335,8 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
             _cursor = None
 
         # 获取表结构
-        _db_prefix = '' if self._db_name == 'main' else ('%s.' % self._db_name)
+        _db_name = self._db_name if db_name is None else db_name
+        _db_prefix = '' if _db_name == 'main' else ('%s.' % _db_name)
         _sql = "PRAGMA %stable_info('%s')" % (_db_prefix, collection)
         _ret = await self._execute_sql(
             _sql, paras=None, is_query=True, conn=_conn, cursor=_cursor
@@ -467,7 +470,8 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         return re.sub(r"\'", "''", val)
 
     def _get_filter_unit_sql(self, key: str, val: Any, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> str:
+            sql_paras: list = [], json_query_cols_dict: dict = {},
+            left_join: list = None, session=None, as_name: str = None, unuse_as_name: bool = False) -> str:
         """
         获取兼容mongodb过滤条件规则的单个规则对应的sql
 
@@ -479,19 +483,62 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
+        @param {dict} json_query_cols_dict={} - 返回sql中json查询所需的json_tree处理的字段字典
+            字典的key为别名, value为该别名下的配置字典, 字典的格式如下:
+            key为查询名(json_query_别名_字段名_字段路径.value), value为配置字典{'col': 物理字段名, 'path': '真实查询路径', 'as': '字段别名'}
+            注1: 真实查询路径 'key1.key2[10].key3' 对应的字段路径为 'key1_key2_10_key3'
+            注2: nosql_driver_extend_tags字段名不填入查询名中
+        @param {list} left_join=None - 左关联配置
+        @param {Any} session=None - 数据库事务连接对象
+        @param {str} as_name=None - 指定主表的别名
+        @param {bool} unuse_as_name=False - 指定不使用as_name
 
         @returns {str} - 单个规则对应的sql
         """
-        # 判断是否处理json的值, 形成最后比较的 key 值
+        # 根据字段判断是主表还是关联表
         _key = key
-        if fixed_col_define is not None:
-            _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
+        _fixed_cols = None
+        if _key[0] != '#':
+            # 主表的过滤条件
+            _as_name = '_main_table' if as_name is None else as_name
+            _col_as_name = '' if unuse_as_name else '%s.' % _as_name
+            if fixed_col_define is not None:
+                _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
+        else:
+            # 关联表的过滤条件
+            _index = _key.find('.')
+            _join_para = left_join[int(_key[1: _index])]
+            _key = _key[_index+1:]
+
+            _join_db_name = _join_para.get('db_name', self._db_name)
+            _join_tab = _join_para['collection']
+            _as_name = '%s' % _join_para.get('as', _join_tab)
+            _col_as_name = '%s.' % _as_name
+
+            _fixed_col_define = AsyncTools.sync_run_coroutine(self._get_fixed_col_define(
+                _join_tab, db_name=_join_db_name, session=session
+            ))
+            if _fixed_col_define is not None:
+                _fixed_cols = copy.deepcopy(_fixed_col_define.get('cols', []))
+
+        # 判断是否处理json的值, 形成最后比较的 key 值
+        _is_json = False
+        if _fixed_cols is not None:
             _fixed_cols.append('_id')
-            if key not in _fixed_cols:
-                _key = 'json_query_%s.value' % key
-                if key not in json_query_cols:
-                    json_query_cols.append(key)
+            if _key not in _fixed_cols:
+                # 非固定字段或json字段的处理
+                _is_json = True
+                if _as_name in ('_main_table', '_inner_temp_as_name'):
+                    _key = self._add_to_json_query_cols(
+                        _key, json_query_cols_dict=json_query_cols_dict, fixed_cols=_fixed_cols,
+                        as_name=_as_name, unuse_as_name=(_col_as_name == '')
+                    )
+                    _key = '%s.value' % json_query_cols_dict[_as_name][_key]['as']
+                else:
+                    # 关联表不使用json_tree形式
+                    _key = self._get_json_extract_sql(
+                        _key, fixed_cols=_fixed_cols, as_name=_as_name, unuse_as_name=(_col_as_name == '')
+                    )
 
         if type(val) == dict:
             # 有特殊规则
@@ -500,10 +547,21 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 if _op in self._filter_symbol_mapping.keys():
                     # 比较值转换为数据库的格式
                     _dbtype, _cmp_val = self._python_to_dbtype(_para)
-                    _cds.append('%s %s ?' % (_key, self._filter_symbol_mapping[_op]))
+                    _cds.append('%s %s ?' % (
+                        _key if _is_json else '%s%s' % (_col_as_name, _key), self._filter_symbol_mapping[_op]
+                    ))
                     sql_paras.append(_cmp_val)
+                elif _op in ('$in', '$nin'):
+                    # in 和 not in
+                    _cds.append('%s %s (%s)' % (
+                        _key if _is_json else '%s%s' % (_col_as_name, _key), 'in' if _op == '$in' else 'not in',
+                        ','.join(['?' for _item in _para])
+                    ))
+                    for _item in _para:
+                        _dbtype, _cmp_val = self._python_to_dbtype(_item)
+                        sql_paras.append(_cmp_val)
                 elif _op == '$regex':
-                    _cds.append("%s REGEXP ?" % _key)
+                    _cds.append("%s REGEXP ?" % (_key if _is_json else '%s%s' % (_col_as_name, _key)))
                     sql_paras.append(_para)
                 else:
                     raise aiosqlite.NotSupportedError('sqlite3 not support this search operation [%s]' % _op)
@@ -511,16 +569,18 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         else:
             # 直接相等的条件
             if val is None:
-                _sql = '%s is NULL' % _key
+                _sql = '%s is NULL' % (_key if _is_json else '%s%s' % (_col_as_name, _key))
             else:
                 _dbtype, _cmp_val = self._python_to_dbtype(val)
-                _sql = '%s = ?' % _key
+                _sql = '%s = ?' % (_key if _is_json else '%s%s' % (_col_as_name, _key))
                 sql_paras.append(_cmp_val)
 
         return _sql
 
     def _get_filter_sql(self, filter: dict, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> str:
+            sql_paras: list = [], json_query_cols_dict: dict = {},
+            left_join: list = None, session=None, as_name: str = None,
+            unuse_as_name: bool = False) -> str:
         """
         获取兼容mongodb过滤条件规则的sql语句
 
@@ -531,7 +591,11 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
+        @param {dict} json_query_cols_dict={} - 返回sql中json查询所需的json_tree处理的字段字典
+        @param {list} left_join=None - 左关联配置
+        @param {Any} session=None - 数据库事务连接对象
+        @param {str} as_name=None - 指定主表的别名
+        @param {bool} unuse_as_name=False - 指定不使用as_name
 
         @returns {str} - 返回的sql语句, 如果没有条件则返回None
         """
@@ -548,7 +612,8 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                     # 逐个条件处理
                     _where = self._get_filter_sql(
                         _condition, fixed_col_define=fixed_col_define, sql_paras=sql_paras,
-                        json_query_cols=json_query_cols
+                        json_query_cols_dict=json_query_cols_dict, left_join=left_join,
+                        session=session, as_name=as_name, unuse_as_name=unuse_as_name
                     )
                     if len(_condition) > 1:
                         # 多条件的情况，需要增加括号进行集合处理
@@ -565,7 +630,8 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 # 正常的and条件
                 _where = self._get_filter_unit_sql(
                     _col, _val, fixed_col_define=fixed_col_define, sql_paras=sql_paras,
-                    json_query_cols=json_query_cols
+                    json_query_cols_dict=json_query_cols_dict, left_join=left_join,
+                    session=session, as_name=as_name, unuse_as_name=unuse_as_name
                 )
                 # 添加条件
                 _condition_list.append(_where)
@@ -574,7 +640,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         return ' and '.join(_condition_list)
 
     def _get_update_sql(self, update: dict, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> str:
+            sql_paras: list = [], json_query_cols_dict: dict = {}) -> str:
         """
         获取兼容mongodb更新语句的sql语句
 
@@ -585,15 +651,17 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
+        @param {dict} json_query_cols_dict={} - 返回sql中json查询所需的json_tree处理的字段字典
 
         @returns {str} - 返回更新部分语句sql
         """
         # 更新辅助字典, key为要更新的字段名, value为{'sql': '对应的sql语句, 比如?', 'paras': [传入sql的参数列表]}
         _upd_dict = {}
 
+        # 扩展字段字典, key要更新的扩展字段名, value为字典: {'sql': None, 'paras': []}
+        _extend_dict = {}
+
         # 遍历处理
-        _extend_dict = {'sql': None, 'paras': []}
         for _op, _para in update.items():
             for _key, _val in _para.items():
                 if fixed_col_define is None or _key == '_id' or _key in fixed_col_define.get('cols', []):
@@ -619,7 +687,20 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                     else:
                         raise aiosqlite.NotSupportedError('sqlite3 not support this update operation [%s]' % _op)
                 else:
-                    # 是扩展字段
+                    # 是扩展字段或json字段
+                    _path_cols = _key.split('.')
+                    if len(_path_cols) > 1 and _path_cols[0] in fixed_col_define.get('cols', []):
+                        # 是固定的json字段
+                        _col_name = _path_cols[0]
+                        _set_key = self._convert_path_array(_path_cols[1:])
+                    else:
+                        # 是扩展字段
+                        _col_name = 'nosql_driver_extend_tags'
+                        _set_key = self._convert_path_array(_path_cols)
+
+                    if _extend_dict.get(_col_name, None) is None:
+                        _extend_dict[_col_name] = {'sql': None, 'paras': []}
+
                     if _op == '$set':
                         _dbtype, _dbval = self._python_to_dbtype(_val, is_json=True)
                         if _dbtype in ('bool', 'json'):
@@ -627,31 +708,31 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                         else:
                             _sql = 'json_set({sql}, "$.{key}", ?)'
 
-                        _extend_dict['paras'].append(_dbval)
+                        _extend_dict[_col_name]['paras'].append(_dbval)
                     elif _op == '$unset':
                         _sql = 'json_remove({sql}, "$.{key}")'
                     elif _op in ('$inc', '$mul', '$min', '$max'):
                         _dbtype, _dbval = self._python_to_dbtype(_val, is_json=True)
                         # 需要取值出来, 添加查询字段
                         if _op == '$inc':
-                            _sql = 'json_set({sql}, "$.{key}", ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), 0) + ?)'
-                            _extend_dict['paras'].append(_dbval)
+                            _sql = 'json_set({sql}, "$.{key}", ifnull(json_extract({col_name}, "$.{key}"), 0) + ?)'
+                            _extend_dict[_col_name]['paras'].append(_dbval)
                         elif _op == '$mul':
-                            _sql = 'json_set({sql}, "$.{key}", ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), 0) * ?)'
-                            _extend_dict['paras'].append(_dbval)
+                            _sql = 'json_set({sql}, "$.{key}", ifnull(json_extract({col_name}, "$.{key}"), 0) * ?)'
+                            _extend_dict[_col_name]['paras'].append(_dbval)
                         elif _op == '$min':
-                            _sql = 'json_set({sql}, "$.{key}", case when ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), ?) < ? then ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), 0) else ? end)'
-                            _extend_dict['paras'].extend([_dbval, _dbval, _dbval])
+                            _sql = 'json_set({sql}, "$.{key}", case when ifnull(json_extract({col_name}, "$.{key}"), ?) < ? then ifnull(json_extract({col_name}, "$.{key}"), 0) else ? end)'
+                            _extend_dict[_col_name]['paras'].extend([_dbval, _dbval, _dbval])
                         elif _op == '$max':
-                            _sql = 'json_set({sql}, "$.{key}", case when ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), ?) > ? then ifnull(json_extract(nosql_driver_extend_tags, "$.{key}"), 0) else ? end)'
-                            _extend_dict['paras'].extend([_dbval, _dbval, _dbval])
+                            _sql = 'json_set({sql}, "$.{key}", case when ifnull(json_extract({col_name}, "$.{key}"), ?) > ? then ifnull(json_extract({col_name}, "$.{key}"), 0) else ? end)'
+                            _extend_dict[_col_name]['paras'].extend([_dbval, _dbval, _dbval])
                     else:
                         raise aiosqlite.NotSupportedError('sqlite3 not support this update operation [%s]' % _op)
 
                     # 处理格式化
-                    _extend_dict['sql'] = _sql.format(
-                        sql='nosql_driver_extend_tags' if _extend_dict['sql'] is None else _extend_dict['sql'],
-                        key=_key
+                    _extend_dict[_col_name]['sql'] = _sql.format(
+                        sql=_col_name if _extend_dict[_col_name]['sql'] is None else _extend_dict[_col_name]['sql'],
+                        key=_set_key, col_name=_col_name
                     )
 
         # 开始生成sql语句和返回参数
@@ -662,73 +743,169 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 sql_paras.extend(_val['paras'])
 
         # 处理扩展字段
-        if _extend_dict['sql'] is not None:
-            _sqls.append('nosql_driver_extend_tags=%s' % _extend_dict['sql'])
-            sql_paras.extend(_extend_dict['paras'])
+        for _col_name, _extend_para in _extend_dict.items():
+            _sqls.append('%s=%s' % (_col_name, _extend_para['sql']))
+            sql_paras.extend(_extend_para['paras'])
 
         return ','.join(_sqls)
 
     def _get_projection_sql(self, projection: Union[dict, list], fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = [], is_group_by: bool = False) -> str:
+            sql_paras: list = [], json_query_cols_dict: dict = {}, is_group_by: bool = False,
+            as_name: str = None, unuse_as_name: bool = False,
+            left_join: list = None, session=None) -> str:
         """
         获取兼容mongodb查询返回字段的sql语句
 
         @param {Union[dict, list]} projection - 指定结果返回的字段信息
             列表模式: ['col1','col2', ...]  注意: 该模式一定会返回 _id 这个主键
             字典模式: {'_id': False, 'col1': True, ...}  该方式可以通过设置False屏蔽 _id 的返回
+                注: 字典模式的值也可以传入字符串, 如果是字符串, 则代表key为别名, value才是真正的字段
         @param {dict} fixed_col_define=None - 表的固定字段配置信息字典
             {
                 'cols': [],  # 表固定字段名清单
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
+        @param {dict} json_query_cols_dict={} - 返回sql中json查询所需的json_tree处理的字段字典
         @param {bool} is_group_by=False - 指定是否group by的处理, 如果是不会处理_id字段
+        @param {str} as_name=None - 字段对应的表别名
+        @param {bool} unuse_as_name=False - 指定不使用as_name
+        @param {list} left_join - 左关联配置
+        @param {Any} session=None - 数据库事务连接对象
 
         @returns {str} - 返回更新部分语句sql
         """
         # 如果不指定, 返回所有字段
         if projection is None:
-            return '*'
+            _base_as_name = '_main_table' if as_name is None else as_name
+            _as_name = '' if unuse_as_name else ('%s.' % _base_as_name)
+            _project_sql = '%s*' % _as_name
+            if left_join is not None:
+                # 补充关联表的所有字段获取
+                for _join_para in left_join:
+                    _project_sql = '%s, %s.*' % (
+                        _project_sql, _join_para.get('as', _join_para['collection'])
+                    )
+
+            return _project_sql
+
+        # 定义的内部函数
+        def _get_join_col_info(col: str, left_join: list, tab_as_name: str, unuse_as_name: bool) -> tuple:
+            # 获取关联表列信息
+            if col[0] == '#':
+                _index = col.find('.')
+                _join_para = left_join[int(col[1: _index])]
+                _col = col[_index+1:]
+                _join_as_name = _join_para.get('as', _join_para['collection'])
+                _join_as_name_sql = '%s.' % _join_as_name
+            else:
+                _col = col
+                _join_as_name = '_main_table' if tab_as_name is None else tab_as_name
+                _join_as_name_sql = '' if unuse_as_name else ('%s.' % _join_as_name)
+
+            return _col, _join_as_name, _join_as_name_sql
 
         # 标准化要显示的字段清单
+        _projection = {}
         if type(projection) == dict:
-            _projection = []
-            for _col, _show in projection.items():
-                if _show:
-                    _projection.append(_col)
+            for _key, _show in projection.items():
+                if type(_show) == str and _show[0] == '$':
+                    _col, _tab_as_name, _tab_as_name_sql = _get_join_col_info(
+                        _show[1:], left_join, as_name, unuse_as_name
+                    )
+                    _projection[_key] = {
+                        'col': _col, 'tab_as': _tab_as_name, 'tab_as_sql': _tab_as_name_sql,
+                        'col_as': _key
+                    }
+                elif _show:
+                    _col, _tab_as_name, _tab_as_name_sql = _get_join_col_info(
+                        _key, left_join, as_name, unuse_as_name
+                    )
+                    _projection[_key] = {
+                        'col': _col, 'tab_as': _tab_as_name, 'tab_as_sql': _tab_as_name_sql
+                    }
         else:
             # 列表形式, _id是必须包含的
-            _projection = list(projection)
-            if not is_group_by and '_id' not in _projection:
-                _projection.insert(0, '_id')
+            if not is_group_by and '_id' not in projection:
+                _projection['_id'] = {
+                    'col': '_id', 'tab_as': '_main_table' if as_name is None else as_name
+                }
+                _projection['_id']['tab_as_sql'] = '' if unuse_as_name else ('%s.' % _projection['_id']['tab_as'])
+
+            for _key in projection:
+                _col, _tab_as_name, _tab_as_name_sql = _get_join_col_info(
+                    _key, left_join, as_name, unuse_as_name
+                )
+                _projection[_key] = {
+                    'col': _col, 'tab_as': _tab_as_name, 'tab_as_sql': _tab_as_name_sql
+                }
+
+        # 处理fixed_cols参数
+        _fixed_cols_dict = {}
+        if fixed_col_define is not None:
+            # 主表的列参数
+            _tab_as_name = '_main_table' if as_name is None else as_name
+            _fixed_cols_dict[_tab_as_name] = {
+                'fixed_define': fixed_col_define,
+                'fixed_cols': copy.deepcopy(fixed_col_define.get('cols', []))
+            }
+            _fixed_cols_dict[_tab_as_name]['fixed_cols'].append('_id')
+
+        if left_join is not None:
+            # 关联表的列参数
+            for _join_para in left_join:
+                _join_db_name = _join_para.get('db_name', self._db_name)
+                _join_tab = _join_para['collection']
+                _join_as_name = _join_para.get('as', _join_tab)
+                _fixed_col_define = AsyncTools.sync_run_coroutine(self._get_fixed_col_define(
+                    _join_tab, db_name=_join_db_name, session=session
+                ))
+                if _fixed_col_define is not None:
+                    _fixed_cols_dict[_join_as_name] = {
+                        'fixed_define': _fixed_col_define,
+                        'fixed_cols': copy.deepcopy(_fixed_col_define.get('cols', []))
+                    }
+                    _fixed_cols_dict[_join_as_name]['fixed_cols'].append('_id')
 
         # 生成sql
-        if fixed_col_define is None:
-            # 全部认为是固定字段
-            return ','.join(_projection)
-
-        _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
-        _fixed_cols.append('_id')
         _real_cols = []
-        for _col in _projection:
-            if _col in _fixed_cols:
-                _real_cols.append(_col)
-                continue
-            elif _col in json_query_cols:
-                # 在查询字段中, 无需另外处理
-                _real_cols.append('json_query_{key}.value as {key}'.format(key=_col))
+        for _key, _val in _projection.items():
+            _fixed_col_define = _fixed_cols_dict.get(_val['tab_as'], {}).get('fixed_define', None)
+            _fixed_cols = _fixed_cols_dict.get(_val['tab_as'], {}).get('fixed_cols', None)
+            _col = _val['col']
+            _as_name = _val['tab_as_sql']
+            _base_as_name = _val['tab_as']
+            if _fixed_cols is None or _col in _fixed_cols:
+                _real_cols.append(('%s%s' % (_as_name, _col)) if _val.get('col_as', None) is None else '%s%s as %s' % (_as_name, _col, _val['col_as']))
             else:
-                # 其他非固定字段
-                _real_cols.append(
-                    'json_extract(nosql_driver_extend_tags, "$.{key}") as {key}'.format(key=_col)
-                )
+                if _base_as_name in ('_main_table', '_inner_temp_as_name'):
+                    _json_key = self._add_to_json_query_cols(
+                        _col, json_query_cols_dict=json_query_cols_dict, fixed_cols=_fixed_cols,
+                        as_name=_base_as_name, unuse_as_name=(_as_name == '')
+                    )
+                    _json_as = json_query_cols_dict[_base_as_name][_json_key]['as']
+                    _json_col = json_query_cols_dict[_base_as_name][_json_key]['real_col']
+                    _real_cols.append(
+                        '%s.value as %s' % (
+                            _json_as, _json_col if _val.get('col_as', None) is None else _val['col_as']
+                        )
+                    )
+                else:
+                    # 关联表不使用json_tree形式
+                    _real_cols.append(
+                        '%s as %s' % (
+                            self._get_json_extract_sql(
+                                _col, fixed_cols=_fixed_cols, as_name=_base_as_name, unuse_as_name=(_as_name == '')
+                            ), _col if _val.get('col_as', None) is None else _val['col_as']
+                        )
+                    )
 
         # 返回sql
         return ','.join(_real_cols)
 
     def _get_sort_sql(self, sort: list, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> str:
+            sql_paras: list = [], json_query_cols_dict: dict = {},
+            left_join: list = None, session=None, unuse_as_name: bool = False) -> str:
         """
         获取兼容mongodb查询排序的sql语句
 
@@ -740,33 +917,83 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
+        @param {dict} json_query_cols={} - 返回sql中json查询所需的json_tree处理的字段字典
+        @param {list} left_join=None - 左关联配置
+        @param {Any} session=None - 数据库事务连接对象
+        @param {bool} unuse_as_name=False - 指定不使用as_name
 
         @returns {str} - 返回更新部分语句sql
         """
-        if fixed_col_define is None:
-            # 全部认为是固定字段
-            _sorts = ['%s %s' % (_item[0], 'asc' if _item[1] == 1 else 'desc') for _item in sort]
-        else:
-            _fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
-            _fixed_cols.append('_id')
-            _sorts = []
-            for _item in sort:
-                _col = _item[0]
-                if _col in _fixed_cols:
-                    _sorts.append('%s %s' % (_col, 'asc' if _item[1] == 1 else 'desc'))
-                else:
-                    # 属于扩展字段, 添加到查询字段中
-                    if _col not in json_query_cols:
-                        json_query_cols.append(_col)
+        _sorts = []
+        # 主表的字段定义参数
+        _main_fixed_cols = None
+        if fixed_col_define is not None:
+            _main_fixed_cols = copy.deepcopy(fixed_col_define.get('cols', []))
+            _main_fixed_cols.append('_id')
 
-                    _sorts.append('json_query_%s.value %s' % (_col, 'asc' if _item[1] == 1 else 'desc'))
+        # 关联表的字段定义列表
+        _fixed_cols_dict = {}
+
+        # 循环处理每个排序参数
+        for _item in sort:
+            # 处理临时参数
+            _col: str = _item[0]
+            if _col[0] != '#':
+                # 属于主表字段
+                _as_name = '_main_table'
+                _col_as_name = '' if unuse_as_name else ('%s.' % _as_name)
+                _fixed_cols = _main_fixed_cols
+            else:
+                # 属于关联表字段
+                _index = _col.find('.')
+                _join_para = left_join[int(_col[1: _index])]
+                _col = _col[_index+1:]
+
+                _join_db_name = _join_para.get('db_name', self._db_name)
+                _join_tab = _join_para['collection']
+                _as_name = '%s' % _join_para.get('as', _join_tab)
+                _col_as_name = '%s.' % _as_name
+                if _as_name in _fixed_cols_dict.keys():
+                    _fixed_cols = _fixed_cols_dict.get(_as_name, None)
+                else:
+                    # 重新获取并放入缓存字典
+                    _fixed_col_define = AsyncTools.sync_run_coroutine(self._get_fixed_col_define(
+                        _join_tab, db_name=_join_db_name, session=session
+                    ))
+                    _fixed_cols = copy.deepcopy(_fixed_col_define.get('cols', []))
+                    _fixed_cols.append('_id')
+                    _fixed_cols_dict[_as_name] = _fixed_cols
+
+            # 生成排序sql语句
+            if _fixed_cols is None:
+                # 所有字段认为是固定字段
+                _sorts.append('%s%s %s' % (_col_as_name, _col, 'asc' if _item[1] == 1 else 'desc'))
+            else:
+                if _col in _fixed_cols:
+                    _sorts.append('%s%s %s' % (_col_as_name, _col, 'asc' if _item[1] == 1 else 'desc'))
+                else:
+                    # 属于扩展字段
+                    if _as_name in ('_main_table', '_inner_temp_as_name'):
+                        _key = self._add_to_json_query_cols(
+                            _col, json_query_cols_dict=json_query_cols_dict, fixed_cols=_fixed_cols,
+                            as_name=_as_name, unuse_as_name=(_col_as_name == '')
+                        )
+                        _sorts.append('%s.value %s' % (
+                            json_query_cols_dict[_as_name][_key]['as'], 'asc' if _item[1] == 1 else 'desc'
+                        ))
+                    else:
+                        # 关联表不使用json_tree形式
+                        _sorts.append('%s %s' % (
+                            self._get_json_extract_sql(
+                                _col, fixed_cols=_fixed_cols, as_name=_as_name, unuse_as_name=(_col_as_name == '')
+                            ), 'asc' if _item[1] == 1 else 'desc'
+                        ))
 
         # 返回结果
         return ','.join(_sorts)
 
     def _get_group_sql(self, group: dict, fixed_col_define: dict = None,
-            sql_paras: list = [], json_query_cols: list = []) -> tuple:
+            sql_paras: list = [], json_query_cols_dict: dict = {}, unuse_as_name: bool = False) -> tuple:
         """
         生成分组sql语句
 
@@ -780,7 +1007,8 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 'define': {'字段名': {'type': 'str|bool|int|...'}}
             }
         @param {list} sql_paras=[] - 返回sql对应的占位参数
-        @param {list} json_query_cols=[] - 返回sql中json查询所需的json_tree处理的字段名
+        @param {dict} json_query_cols_dict={} - 返回sql中json查询所需的json_tree处理的字段字典
+        @param {bool} unuse_as_name=False - 指定不使用as_name
 
         @returns {tuple} - 返回sql, (select语句, group by语句)
         """
@@ -812,11 +1040,14 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                     _col = _col[1:]
                     if _col not in _fixed_cols:
                         # 非固定字段
-                        if _col not in json_query_cols:
-                            json_query_cols.append(_col)
-                        _col = 'json_query_%s.value' % _col
-
-                    _select.append('%s(%s) as %s' % (_op_mapping[_op], _col, _key))
+                        _col = self._add_to_json_query_cols(
+                            _col, json_query_cols_dict=json_query_cols_dict, fixed_cols=_fixed_cols,
+                            unuse_as_name=unuse_as_name
+                        )
+                        _col = json_query_cols_dict['_main_table'][_col]['as']
+                        _select.append('%s(%s.value) as %s' % (_op_mapping[_op], _col, _key))
+                    else:
+                        _select.append('%s(%s) as %s' % (_op_mapping[_op], _col, _key))
                 else:
                     # 是值
                     _select.append('%s(?) as %s' % (_op_mapping[_op], _key))
@@ -826,12 +1057,16 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 _col = _val[1:]
                 if _col not in _fixed_cols:
                     # 非固定字段
-                    if _col not in json_query_cols:
-                        json_query_cols.append(_col)
-                    _col = 'json_query_%s.value' % _col
-
-                _select.append('%s as %s' % (_col, _key))
-                _groupby.append(_col)
+                    _col = self._add_to_json_query_cols(
+                        _col, json_query_cols_dict=json_query_cols_dict, fixed_cols=_fixed_cols,
+                        unuse_as_name=unuse_as_name
+                    )
+                    _col = json_query_cols_dict['_main_table'][_col]['as']
+                    _select.append('%s.value as %s' % (_col, _key))
+                    _groupby.append('%s.value' % _col)
+                else:
+                    _select.append('%s as %s' % (_col, _key))
+                    _groupby.append('%s' % _col)
             else:
                 # 是固定值
                 _select.append('? as %s' % _key)
@@ -859,6 +1094,106 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
                 return "'%s'" % self._db_quotes_str(val)
         else:
             return "'%s'" % self._db_quotes_str(str(val))
+
+    def _get_left_join_sqls(self, db_name: str, collection: str, left_join: list, sql_paras: list = [],
+            json_query_cols_dict: dict = {}, session=None, fixed_col_define: dict = None) -> list:
+        """
+        获取左关联的关联表sql清单
+
+        @param {str} db_name - 主表数据库名
+        @param {str} collection - 主表名
+        @param {list} left_join - 左关联配置
+        @param {list} sql_paras=[] - 返回sql对应的占位参数
+        @param {dict} json_query_cols_dict={} - 返回sql中json查询所需的json_tree处理的字段字典
+        @param {Any} session=None - 数据库事务连接对象
+        @param {dict} fixed_col_define=None - 主表的固定字段配置信息字典
+            {
+                'cols': [],  # 表固定字段名清单
+                'define': {'字段名': {'type': 'str|bool|int|...'}}
+            }
+
+        @returns {list} - 关联表sql清单
+        """
+        _sqls = []
+        # 遍历生成每个表的关联sql
+        for _join_para in left_join:
+            _join_db_name = _join_para.get('db_name', db_name)
+            _join_tab = _join_para['collection']
+            _as_name = _join_para.get('as', _join_tab)
+
+            if _as_name not in json_query_cols_dict.keys():
+                # 初始化json列字典表
+                json_query_cols_dict[_as_name] = {}
+
+            # 表字段定义
+            _fixed_col_define = {'cols': []} if fixed_col_define is None else fixed_col_define
+            _fixed_cols = _fixed_col_define['cols']
+            _join_fixed_col_define = AsyncTools.sync_run_coroutine(self._get_fixed_col_define(
+                _join_tab, db_name=_join_db_name, session=session
+            ))
+            _join_fixed_cols = _join_fixed_col_define['cols']
+
+            # on语句
+            _on_fields = []
+            for _on in _join_para['join_fields']:
+                if _on[0] != '_id' and _on[0] not in _fixed_col_define['cols']:
+                    # 扩展字段
+                    # _key = self._add_to_json_query_cols(
+                    #     _on[0], json_query_cols_dict=json_query_cols_dict, fixed_cols=_fixed_cols
+                    # )
+                    # _field0 = "%s.value" % json_query_cols_dict['_main_table'][_key]['as']
+                    _field0 = self._get_json_extract_sql(
+                        _on[0], fixed_cols=_fixed_cols
+                    )
+                else:
+                    _field0 = '_main_table.%s' % _on[0]
+
+                if _on[1] != '_id' and _on[1] not in _join_fixed_col_define['cols']:
+                    # 扩展字段
+                    # _key = self._add_to_json_query_cols(
+                    #     _on[1], json_query_cols_dict=json_query_cols_dict, fixed_cols=_join_fixed_cols,
+                    #     as_name=_as_name
+                    # )
+                    # _field1 = "%s.value" % json_query_cols_dict[_as_name][_key]['as']
+                    _field1 = self._get_json_extract_sql(
+                        _on[1], fixed_cols=_join_fixed_cols, as_name=_as_name
+                    )
+                else:
+                    _field1 = '%s.%s' % (_as_name, _on[1])
+
+                _on_fields.append('%s = %s' % (_field0, _field1))
+
+            # 根据是否有过滤条件处理
+            _filter = _join_para.get('filter', None)
+            if _filter is None:
+                _sqls.append({
+                    'as': _as_name, 'tab': '%s.%s' % (_join_db_name, _join_tab), 'on': _on_fields
+                })
+            else:
+                # 有过滤条件, 按查询表的方式关联
+                _self_json_query_cols_dict = {'_inner_temp_as_name': {}}
+                _self_sql_paras = []
+                _filter_sql = self._get_filter_sql(
+                    _filter, fixed_col_define=_join_fixed_col_define, sql_paras=_self_sql_paras,
+                    json_query_cols_dict=_self_json_query_cols_dict, as_name='_inner_temp_as_name',
+                    unuse_as_name=True
+                )
+                _self_tabs = ['%s.%s' % (_join_db_name, _join_tab)]
+                for _key, _key_para in _self_json_query_cols_dict['_inner_temp_as_name'].items():
+                    _self_tabs.append(
+                        'json_tree(%s, "$.%s") as %s' % (
+                            _key_para['col'], _key_para['path'], _key_para['as']
+                        )
+                    )
+
+                _sqls.append({
+                    'as': _as_name, 'on': _on_fields, 'sql_paras': _self_sql_paras,
+                    'tab': '(select * from %s where %s)' % (
+                        ','.join(_self_tabs), _filter_sql
+                    )
+                })
+
+        return _sqls
 
     #############################
     # 生成SQL转换的处理函数
@@ -946,7 +1281,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         _filter = kwargs.get('filter', None)
         # 生成where语句
         _sql_paras = []
-        _where = self._get_filter_sql(_filter, sql_paras=_sql_paras)
+        _where = self._get_filter_sql(_filter, sql_paras=_sql_paras, unuse_as_name=True)
 
         _sql = "SELECT name FROM %ssqlite_master where type='table'%s order by name" % (
             _db_prefix, '' if _where is None else ' and %s' % _where
@@ -1076,21 +1411,21 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         # 处理where条件语句
         _where_sql_paras = []
-        _json_query_cols = []
+        _json_query_cols_dict = {'_main_table': {}}
         _where_sql = self._get_filter_sql(
             _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            json_query_cols_dict=_json_query_cols_dict, unuse_as_name=True
         )
 
         # 处理更新配置语句
         _update_sql_paras = []
         _update_sql = self._get_update_sql(
             _update, fixed_col_define=_fixed_col_define, sql_paras=_update_sql_paras,
-            json_query_cols=_json_query_cols
+            json_query_cols_dict=_json_query_cols_dict
         )
 
         _sql_collection = '%s%s' % (_db_prefix, _collection)
-        if len(_json_query_cols) == 0:
+        if len(_json_query_cols_dict['_main_table']) == 0:
             # 没有以json对象做条件的情况
             _sql = 'update %s set %s' % (_sql_collection, _update_sql)
             if _where_sql is not None:
@@ -1099,8 +1434,12 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         else:
             # 有使用json对象做条件, 由于update语句不支持json_tree, 要使用子查询的方式处理
             _tabs = [_sql_collection]
-            for _col in _json_query_cols:
-                _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
+            for _key, _key_para in _json_query_cols_dict['_main_table'].items():
+                _tabs.append(
+                    'json_tree(%s, "$.%s") as %s' % (
+                        _key_para['col'], _key_para['path'], _key_para['as']
+                    )
+                )
 
             _sql = 'update %s set %s where _id in (select _id from %s%s)' % (
                 _sql_collection, _update_sql, ','.join(_tabs),
@@ -1124,15 +1463,15 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         # 处理where条件语句
         _where_sql_paras = []
-        _json_query_cols = []
+        _json_query_cols_dict = {'_main_table': {}}
         _where_sql = self._get_filter_sql(
             _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            json_query_cols_dict=_json_query_cols_dict, unuse_as_name=True
         )
 
         _sql_paras = None
         _sql_collection = '%s%s' % (_db_prefix, _collection)
-        if len(_json_query_cols) == 0:
+        if len(_json_query_cols_dict['_main_table']) == 0:
             # 没有以json对象做条件的情况
             _sql = 'delete from %s' % _sql_collection
             if _where_sql is not None:
@@ -1141,8 +1480,12 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         else:
             # 有使用json对象做条件, 由于delete语句不支持json_tree, 要使用子查询的方式处理
             _tabs = [_sql_collection]
-            for _col in _json_query_cols:
-                _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
+            for _key, _key_para in _json_query_cols_dict['_main_table'].items():
+                _tabs.append(
+                    'json_tree(%s, "$.%s") as %s' % (
+                        _key_para['col'], _key_para['path'], _key_para['as']
+                    )
+                )
 
             _sql = 'delete from %s where _id in (select _id from %s%s)' % (
                 _sql_collection, ','.join(_tabs),
@@ -1167,13 +1510,29 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         _skip = kwargs.get('skip', None)
         _limit = kwargs.get('limit', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _left_join = kwargs.get('left_join', None)  # 关联查询
+        _session = kwargs.get('session', None)  # 数据库操作的session
+
+        # 存储不同表的json查询列信息的字典
+        _json_query_cols_dict = {
+            '_main_table': {}  # 主表
+        }
+
+        # 处理关联表
+        _left_join_sql_paras = []
+        _left_join_sqls = None
+        if _left_join is not None:
+            _left_join_sqls = self._get_left_join_sqls(
+                self._db_name, _collection, _left_join, sql_paras=_left_join_sql_paras,
+                json_query_cols_dict=_json_query_cols_dict,
+                session=_session, fixed_col_define=_fixed_col_define
+            )
 
         # 处理where条件语句
         _where_sql_paras = []
-        _json_query_cols = []
         _where_sql = self._get_filter_sql(
             _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            json_query_cols_dict=_json_query_cols_dict, left_join=_left_join, session=_session
         )
 
         # 处理sort语句
@@ -1182,30 +1541,49 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         if _sort is not None:
             _sort_sql = self._get_sort_sql(
                 _sort, fixed_col_define=_fixed_col_define, sql_paras=_sort_sql_paras,
-                json_query_cols=_json_query_cols
+                json_query_cols_dict=_json_query_cols_dict, left_join=_left_join, session=_session
             )
 
         # 处理projection语句
         _projection_sql_paras = []
         _projection_sql = self._get_projection_sql(
             _projection, fixed_col_define=_fixed_col_define, sql_paras=_projection_sql_paras,
-            json_query_cols=_json_query_cols
+            json_query_cols_dict=_json_query_cols_dict, left_join=_left_join, session=_session
         )
 
         # 形成查询json的表别名
-        _tabs = ['%s%s' % (_db_prefix, _collection)]
-        for _col in _json_query_cols:
-            _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
-
-        if _projection_sql == '*':
-            # 解决会把json_tree字段查出来的问题
-            _tabs[0] = '%s as _main_table' % _tabs[0]
-            _projection_sql = '_main_table.*'
+        _tabs = ['%s%s as _main_table' % (_db_prefix, _collection)]
+        for _key, _key_para in _json_query_cols_dict['_main_table'].items():
+            _tabs.append(
+                'json_tree(%s, "$.%s") as %s' % (
+                    _key_para['col'], _key_para['path'], _key_para['as']
+                )
+            )
 
         # 组装语句
         _sql_paras = []
         _sql = 'select %s from %s' % (_projection_sql, ','.join(_tabs))
         _sql_paras.extend(_projection_sql_paras)
+
+        # 组装关联表
+        if _left_join_sqls is not None:
+            for _left_join_para in _left_join_sqls:
+                _as_name = _left_join_para['as']
+                _join_tabs = ['%s as %s' % (_left_join_para['tab'], _as_name)]
+                # for _key, _key_para in _json_query_cols_dict[_as_name].items():
+                #     _join_tabs.append(
+                #         'json_tree(%s, "$.%s") as %s' % (
+                #             _key_para['col'], _key_para['path'], _key_para['as']
+                #         )
+                #     )
+
+                _sql = '%s left outer join %s' % (
+                    _sql, '%s on %s' % (
+                        ','.join(_join_tabs), ' and '.join(_left_join_para['on'])
+                    )
+                )
+                if _left_join_para.get('sql_paras', None) is not None:
+                    _sql_paras.extend(_left_join_para['sql_paras'])
 
         if _where_sql is not None:
             _sql = '%s where %s' % (_sql, _where_sql)
@@ -1239,25 +1617,57 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         _skip = kwargs.get('skip', None)
         _limit = kwargs.get('limit', None)
         _fixed_col_define = kwargs.get('fixed_col_define', None)
+        _left_join = kwargs.get('left_join', None)  # 关联查询
+        _session = kwargs.get('session', None)  # 数据库操作的session
+
+        # 存储不同表的json查询列信息的字典
+        _json_query_cols_dict = {
+            '_main_table': {}  # 主表
+        }
+
+        # 处理关联表
+        _left_join_sql_paras = []
+        _left_join_sqls = None
+        if _left_join is not None:
+            _left_join_sqls = self._get_left_join_sqls(
+                self._db_name, _collection, _left_join, sql_paras=_left_join_sql_paras,
+                json_query_cols_dict=_json_query_cols_dict,
+                session=_session, fixed_col_define=_fixed_col_define
+            )
 
         # 处理where条件语句
         _where_sql_paras = []
-        _json_query_cols = []
         _where_sql = self._get_filter_sql(
             _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            json_query_cols_dict=_json_query_cols_dict, left_join=_left_join, session=_session
         )
 
         # 形成查询json的表别名
-        _tabs = ['%s%s' % (_db_prefix, _collection)]
-        for _col in _json_query_cols:
-            _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
+        _tabs = ['%s%s as _main_table' % (_db_prefix, _collection)]
+        for _key, _key_para in _json_query_cols_dict['_main_table'].items():
+            _tabs.append(
+                'json_tree(%s, "$.%s") as %s' % (
+                    _key_para['col'], _key_para['path'], _key_para['as']
+                )
+            )
 
         # 组装语句
         if _limit is not None or _skip is not None:
             # 有获取数据区间, 只能采用性能差的子查询模式
             _sql_paras = []
             _sub_sql = 'select * from %s' % (','.join(_tabs))
+
+            # 组装关联表
+            if _left_join_sqls is not None:
+                for _left_join_para in _left_join_sqls:
+                    _sub_sql = '%s left outer join %s' % (
+                        _sub_sql, '%s as %s on %s' % (
+                            _left_join_para['tab'], _left_join_para['as'], ' and '.join(_left_join_para['on'])
+                        )
+                    )
+                    if _left_join_para.get('sql_paras', None) is not None:
+                        _sql_paras.extend(_left_join_para['sql_paras'])
+
             if _where_sql is not None:
                 _sub_sql = '%s where %s' % (_sub_sql, _where_sql)
                 _sql_paras.extend(_where_sql_paras)
@@ -1276,6 +1686,17 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         else:
             _sql_paras = []
             _sql = 'select count(*) from %s' % (','.join(_tabs))
+
+            # 组装关联表
+            if _left_join_sqls is not None:
+                for _left_join_para in _left_join_sqls:
+                    _sql = '%s left outer join %s' % (
+                        _sql, '%s as %s on %s' % (
+                            _left_join_para['tab'], _left_join_para['as'], ' and '.join(_left_join_para['on'])
+                        )
+                    )
+                    if _left_join_para.get('sql_paras', None) is not None:
+                        _sql_paras.extend(_left_join_para['sql_paras'])
 
             if _where_sql is not None:
                 _sql = '%s where %s' % (_sql, _where_sql)
@@ -1299,23 +1720,43 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         # 处理group by语句
         _select_sql_paras = []
-        _json_query_cols = []
+        _json_query_cols_dict = {'_main_table': {}}
         _select_sql, _group_by_sql = self._get_group_sql(
             _group, fixed_col_define=_fixed_col_define, sql_paras=_select_sql_paras,
-            json_query_cols=_json_query_cols
+            json_query_cols_dict=_json_query_cols_dict, unuse_as_name=True
         )
 
         # 处理where条件语句
         _where_sql_paras = []
         _where_sql = self._get_filter_sql(
             _filter, fixed_col_define=_fixed_col_define, sql_paras=_where_sql_paras,
-            json_query_cols=_json_query_cols
+            json_query_cols_dict=_json_query_cols_dict, unuse_as_name=True
+        )
+
+        # 处理sort语句
+        _sort_sql_paras = []
+        _sort_sql = None
+        if _sort is not None:
+            _sort_sql = self._get_sort_sql(
+                _sort, fixed_col_define=None, sql_paras=_sort_sql_paras,
+                json_query_cols_dict=_json_query_cols_dict, unuse_as_name=True
+            )
+
+        # 处理projection语句
+        _projection_sql_paras = []
+        _projection_sql = self._get_projection_sql(
+            _projection, fixed_col_define=None, sql_paras=_projection_sql_paras,
+            json_query_cols_dict=_json_query_cols_dict, is_group_by=True, unuse_as_name=True
         )
 
         # 形成查询json的表别名
         _tabs = ['%s%s' % (_db_prefix, _collection)]
-        for _col in _json_query_cols:
-            _tabs.append('json_tree(nosql_driver_extend_tags, "$.{key}") as json_query_{key}'.format(key=_col))
+        for _key, _key_para in _json_query_cols_dict['_main_table'].items():
+            _tabs.append(
+                'json_tree(%s, "$.%s") as %s' % (
+                    _key_para['col'], _key_para['path'], _key_para['as']
+                )
+            )
 
         # 组装查询语句
         _sql_paras = []
@@ -1330,22 +1771,6 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         _sql = '%s group by %s' % (_sql, _group_by_sql)
 
-        # 处理sort语句
-        _sort_sql_paras = []
-        _sort_sql = None
-        if _sort is not None:
-            _sort_sql = self._get_sort_sql(
-                _sort, fixed_col_define=None, sql_paras=_sort_sql_paras,
-                json_query_cols=_json_query_cols
-            )
-
-        # 处理projection语句
-        _projection_sql_paras = []
-        _projection_sql = self._get_projection_sql(
-            _projection, fixed_col_define=None, sql_paras=_projection_sql_paras,
-            json_query_cols=_json_query_cols, is_group_by=True
-        )
-
         if _sort_sql is not None or _projection_sql != '*':
             # 有排序或指定返回字段的情况, 需要包装多一层
             _sql = 'select %s from (%s)' % (_projection_sql, _sql)
@@ -1354,3 +1779,84 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         # 返回结果
         return ([_sql], None if len(_sql_paras) == 0 else [_sql_paras], {'is_query': True})
+
+    #############################
+    # 其他内部函数
+    #############################
+    def _convert_path_array(self, path_list: list) -> str:
+        """
+        将json查询路径数组转换为sqlite支持的json查询路径字符串
+
+        @param {list} path_list - 路径数组
+
+        @returns {str} - 转换后的查询路径字符串
+        """
+        _path = ''
+        for _key in path_list:
+            if ValidateTool.str_is_int(_key):
+                # 是字符串
+                _path = '%s[%s]' % (_path, _key)
+            else:
+                _path = '%s%s' % ('' if _path == '' else '%s.' % _path, _key)
+
+        return _path
+
+    def _add_to_json_query_cols(self, col_name: str, json_query_cols_dict: dict = {}, fixed_cols: list = [],
+            as_name: str = '_main_table', unuse_as_name: bool = False) -> str:
+        """
+        将字段查询信息添加到json_query_cols_dict字典
+
+        @param {str} col_name - 查询字段名(x.x.x形式)
+        @param {dict} json_query_cols_dict={} - 返回sql中json查询所需的json_tree处理的字段字典
+            key为查询名(json_query_[as_name]_字段名_字段路径.value), value为配置字典{'col': 物理字段名, 'path': '真实查询路径', 'as': '字段别名'}
+            注1: 真实查询路径 'key1.key2[10].key3' 对应的字段路径为 'key1_key2_10_key3'
+            注2: nosql_driver_extend_tags字段名不填入查询名中
+        @param {list} fixed_cols=[] - 固定字段定义清单
+        @param {str} as_name='_main_table' - 字典对应表的别名
+        @param {bool} unuse_as_name=False - 指定不使用as_name
+
+        @returns {str} - 返回json_query_cols_dict字典对应的key
+        """
+        _path_cols = col_name.split('.')
+        _as = '%s%s' % ('' if unuse_as_name else ('%s_' % as_name), '_'.join(_path_cols))
+        _key = 'json_query_%s.value' % _as
+        _key_para = json_query_cols_dict[as_name].get(_key, None)
+        if _key_para is None:
+            # 不在查询字段中, 需要添加到查询字段
+            if len(_path_cols) > 1 and _path_cols[0] in fixed_cols:
+                # 是json类型的固定字段
+                _col_name = _path_cols[0]
+                _path = self._convert_path_array(_path_cols[1:])
+            else:
+                _col_name = 'nosql_driver_extend_tags'
+                _path = self._convert_path_array(_path_cols)
+
+            json_query_cols_dict[as_name][_key] = {
+                'col': '%s%s' % ('' if unuse_as_name else ('%s.' % as_name), _col_name), 'path': _path, 'as': _as, 'real_col': col_name
+            }
+
+        return _key
+
+    def _get_json_extract_sql(self, col_name: str, fixed_cols: list = [], as_name: str = '_main_table',
+            unuse_as_name: bool = False) -> str:
+        """
+        获取指定字段的json_extract函数字符串
+
+        @param {str} col_name - 查询字段名(x.x.x形式)
+        @param {list} fixed_cols=[] - 固定字段定义清单
+        @param {str} as_name='_main_table' - 字典对应表的别名
+        @param {bool} unuse_as_name=False - 指定不使用as_name
+
+        @returns {str} - 返回的sql语句
+        """
+        _as = '' if unuse_as_name else ('%s.' % as_name)
+        _path_cols = col_name.split('.')
+        if len(_path_cols) > 1 and _path_cols[0] in fixed_cols:
+            # 是json类型的固定字段
+            _col_name = _path_cols[0]
+            _path = self._convert_path_array(_path_cols[1:])
+        else:
+            _col_name = 'nosql_driver_extend_tags'
+            _path = self._convert_path_array(_path_cols)
+
+        return 'json_extract(%s%s, "$.%s")' % (_as, _col_name, _path)
