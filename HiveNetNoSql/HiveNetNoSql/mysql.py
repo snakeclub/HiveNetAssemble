@@ -17,7 +17,6 @@ import copy
 import re
 from typing import Any, Union
 import json
-import aiomysql
 from bson.objectid import ObjectId
 from HiveNetCore.utils.run_tool import AsyncTools
 from HiveNetCore.utils.validate_tool import ValidateTool
