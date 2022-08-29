@@ -46,9 +46,8 @@ if sys.platform in ('win32',):
         except win32process.error as e:
             raise ValueError
 
-elif sys.platform in ('linux2'):
+elif sys.platform.startswith('linux'):
     from _affinity import set_process_affinity_mask, get_process_affinity_mask
-
 else:
     def set_process_affinity_mask(pid, value):
         raise NotImplementedError

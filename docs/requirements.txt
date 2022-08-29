@@ -28,8 +28,11 @@ flask-socketio
 gevent-websocket
 websocket-client
 werkzeug~=2.0.0
-sanic
-sanic-ext
+sanic==21.12.1
+sanic-ext==21.12.3
+Sanic-Cors
+sanic-plugin-toolkit
 pycryptodome
 psutil
-aiohttp
+aiohttp,
+affinity

@@ -33,7 +33,8 @@ DEPENDENCIES = [
     'nest_asyncio',
     'requests',
     'ruamel.yaml',
-    'psutil'
+    'psutil',
+    'affinity'
 ]
 
 if sys.platform == 'win32':
