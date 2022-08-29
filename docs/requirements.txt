@@ -34,5 +34,5 @@ Sanic-Cors
 sanic-plugin-toolkit
 pycryptodome
 psutil
-aiohttp,
+aiohttp
 affinity
