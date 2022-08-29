@@ -21,10 +21,12 @@ from recommonmark.transform import AutoStructify
 import os
 import sys
 sys.path.insert(0, os.path.abspath('.'))
+
 # 增加snakerpy的注释类型支持插件搜索路径
 sys.path.append(
     os.path.join(os.path.dirname(__file__), os.path.pardir, 'ext')
 )
+
 # 子项目HiveNetCore的检索路径
 sys.path.append(os.path.join(
     os.path.abspath(os.path.dirname(__file__)),

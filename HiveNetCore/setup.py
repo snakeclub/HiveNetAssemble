@@ -32,7 +32,8 @@ DEPENDENCIES = [
     'elementpath',
     'nest_asyncio',
     'requests',
-    'ruamel.yaml'
+    'ruamel.yaml',
+    'psutil'
 ]
 
 if sys.platform == 'win32':

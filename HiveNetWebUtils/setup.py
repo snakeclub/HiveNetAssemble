@@ -25,7 +25,8 @@ Provides common web service abstract classes and tool classes.""".strip()
 
 DEPENDENCIES = [
     'HiveNetCore>=0.1.2',
-    'lxml'
+    'lxml',
+    'aiohttp'
 ]
 
 if sys.platform == 'win32':

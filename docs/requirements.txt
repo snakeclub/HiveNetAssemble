@@ -31,3 +31,5 @@ werkzeug~=2.0.0
 sanic
 sanic-ext
 pycryptodome
+psutil
+aiohttp
