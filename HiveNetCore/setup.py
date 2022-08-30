@@ -33,12 +33,8 @@ DEPENDENCIES = [
     'nest_asyncio',
     'requests',
     'ruamel.yaml',
-    'psutil',
-    'affinity'
+    'psutil'
 ]
-
-if sys.platform == 'win32':
-    DEPENDENCIES.append('pywin32')
 
 TEST_DEPENDENCIES = []
 

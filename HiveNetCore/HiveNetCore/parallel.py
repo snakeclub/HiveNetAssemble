@@ -9,7 +9,6 @@
 
 """
 并发处理模块, 多线程、多进程支持
-注意: 本模块要使用内置的affinity, 在windows平台需要同步安装pywin32；
 @module parallel
 @file parallel.py
 
@@ -30,11 +29,8 @@ import logging
 import psutil
 import asyncio
 from abc import ABC, abstractmethod  # 利用abc模块实现抽象类
-if sys.platform == 'win32':
-    import win32con
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
-import HiveNetCore.utils.affinity as affinity
 from HiveNetCore.generic import CResult
 from HiveNetCore.utils.value_tool import ValueTool
 from HiveNetCore.utils.run_tool import RunTool
@@ -2068,45 +2064,6 @@ class ProcessParallel(ParallelFw):
     #############################
     # 自身特定的函数
     #############################
-    def bind_cpu(self, cpu_num=1):
-        """
-        绑定进程在指定CPU上执行
-        注: 暂时只支持windows和linux
-
-        @param {long} cpu_num=1L - 要指定的CPU
-
-        @throws {NotRunning} - 当进程未运行时, 抛出该异常
-
-        """
-        self._stat_lock.acquire()
-        try:
-            if not self._get_is_running():
-                raise NotRunning
-
-            _pid = self._thread.pid
-        finally:
-            self._stat_lock.release()
-
-        if sys.platform in ('win32', 'linux2'):
-            try:
-                _last_cpu = affinity.set_process_affinity_mask(_pid, cpu_num)
-                # 打印日志
-                if self._logger is not None:
-                    self._logger.log(
-                        self._log_level,
-                        'set process [%s:%s] bind cpu - [pid:%s] from %s to %s' % (
-                            self._pid,
-                            self._pname,
-                            str(_pid),
-                            str(_last_cpu),
-                            str(cpu_num)
-                        )
-                    )
-            except:
-                if self._logger is not None:
-                    self._logger.log(
-                        'affinity for python 3 incorrect, change affinity/__init__.py to fix'
-                    )
 
     def get_runing_cpu(self):
         """

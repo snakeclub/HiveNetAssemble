@@ -35,4 +35,3 @@ sanic-plugin-toolkit
 pycryptodome
 psutil
 aiohttp
-affinity

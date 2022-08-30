@@ -1,14 +1,6 @@
 HiveNetCore.utils package
 =========================
 
-Subpackages
------------
-
-.. toctree::
-   :maxdepth: 4
-
-   HiveNetCore.utils.affinity
-
 Submodules
 ----------
 
