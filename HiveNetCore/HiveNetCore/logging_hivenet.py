@@ -538,7 +538,7 @@ class Logger(object):
         self.__logger_name = logger_name
         if type(logger_name) == EnumLoggerName:
             self.__logger_name = logger_name.value
-        self.__logfile_path = logfile_path
+        self.__logfile_path = logfile_path.replace('\\', '/')
         self.__config_type = config_type
         self.__work_path = os.path.realpath(sys.path[0])
         if config_type in (EnumLoggerConfigType.INI_FILE, EnumLoggerConfigType.JSON_FILE):
@@ -554,7 +554,7 @@ class Logger(object):
             self.__create_conf_file()
         elif self.__config_type == EnumLoggerConfigType.JSON_STR:
             # 不自动创建配置文件的情况下, 需要更新文件路径
-            self.__json_str = self.__json_str.replace('{$log_file_path$}', logfile_path)
+            self.__json_str = self.__json_str.replace('{$log_file_path$}', self.__logfile_path)
 
         # 如果是JSON格式, 先加载到对象
         if self.__config_type == EnumLoggerConfigType.JSON_STR:
