@@ -127,7 +127,7 @@ class ServerBaseFW(object):
                 _auth = cls.get_auth_fun(auth_name=auth_name, app_name=app_name)
 
                 # 执行验证修饰函数
-                return  AsyncTools.sync_run_coroutine(
+                return AsyncTools.sync_run_coroutine(
                     _auth.auth_required_call(f, *args, **kwargs)
                 )
             return decorated

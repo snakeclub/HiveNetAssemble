@@ -70,6 +70,7 @@ def server_on_thread_sync():
                 'workers': 1,
                 'access_log': True
             },
+            'add_default_route': False,
             'run_in_thread': True
         },
         before_server_start=before_server_start,
@@ -79,11 +80,11 @@ def server_on_thread_sync():
     )
     _result = AsyncTools.sync_run_coroutine(_server.add_service('/', index))
     if not _result.is_success():
-        print('add service error: %s' % str(_result))
+        print('add service error 1: %s' % str(_result))
 
     _result = AsyncTools.sync_run_coroutine(_server.add_service('/a', index1))
     if not _result.is_success():
-        print('add service error: %s' % str(_result))
+        print('add service error 2: %s' % str(_result))
 
     _result = AsyncTools.sync_run_coroutine(_server.start(is_asyn=True))
 
@@ -110,6 +111,7 @@ def server_on_thread_async():
                 'workers': 1,
                 'access_log': True
             },
+            'add_default_route': False,
             'run_in_thread': True
         },
         before_server_start=before_server_start,
@@ -119,11 +121,11 @@ def server_on_thread_async():
     )
     _result = AsyncTools.sync_run_coroutine(_server.add_service('/', index))
     if not _result.is_success():
-        print('add service error: %s' % str(_result))
+        print('add service error 3: %s' % str(_result))
 
     _result = AsyncTools.sync_run_coroutine(_server.add_service('/a', index1))
     if not _result.is_success():
-        print('add service error: %s' % str(_result))
+        print('add service error 4: %s' % str(_result))
 
     _result = AsyncTools.sync_run_coroutine(_server.start(is_asyn=False))
     if not _result.is_success():
@@ -143,6 +145,7 @@ def server_main():
                 'workers': 2,
                 'access_log': True
             },
+            'add_default_route': False,
             'run_in_thread': False
         },
         before_server_start=before_server_start,
@@ -152,11 +155,11 @@ def server_main():
     )
     _result = AsyncTools.sync_run_coroutine(_server.add_service('/', index))
     if not _result.is_success():
-        print('add service error: %s' % str(_result))
+        print('add service error 5: %s' % str(_result))
 
     _result = AsyncTools.sync_run_coroutine(_server.add_service('/a', index1))
     if not _result.is_success():
-        print('add service error: %s' % str(_result))
+        print('add service error 6: %s' % str(_result))
 
     _result = AsyncTools.sync_run_coroutine(_server.start(is_asyn=False))
     if not _result.is_success():

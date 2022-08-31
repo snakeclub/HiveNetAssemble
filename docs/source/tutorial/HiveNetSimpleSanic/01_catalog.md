@@ -32,6 +32,9 @@ PIPY安装：pip install HiveNetSimpleSanic
 安装：pip install HiveNetSimpleSanic-0.1.0-py3-none-any.whl
 
 
+- 注意事项
+
+1、为了支持异步处理，HiveNetSimpleSanic使用了nest_asyncio，由于nest_asyncio不支持uvloop，因此如果安装了该包，请卸载：pip uninstall uvloop
 
 
 ## 库模块大纲
@@ -82,7 +85,7 @@ def deal_fun_3(request):
   通用python对象直接返回
   """
   return {'func_name': 'deal_fun_3'}
-  
+
 # 使用鉴权
 @SanicTool.support_object_resp
 @SanicServer.auth_required_static(auth_name='IPAuth', app_name='demo_server')
@@ -91,12 +94,12 @@ def deal_fun_4(request):
   通用python对象直接返回
   """
   return {'func_name': 'deal_fun_4'}
-  
+
 # 步骤2:
 # 定义生命周期函数, 这里示例只定义before_server_start
 def before_server_start(server_obj):
    print('before server start')
-  
+
 # 步骤3:
 # 初始化鉴权实例对象(如果无需鉴权功能可不忽略)
 _ip_auth = IPAuthSanic(
