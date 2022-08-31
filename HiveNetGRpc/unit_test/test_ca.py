@@ -105,7 +105,7 @@ class TestFunction(object):
         ))
         _result = RemoteCallFormater.format_call_result(_result)
         case_obj.assertTrue(
-            _result.code == '20408',
+            _result.code in ('20408', '30403'),
             '%s error: %s' % (_tips, str(_result))
         )
 
