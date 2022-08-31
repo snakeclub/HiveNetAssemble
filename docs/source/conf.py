@@ -20,6 +20,8 @@ from recommonmark.transform import AutoStructify
 # 新增检索代码的路径
 import os
 import sys
+
+from torch import R
 sys.path.insert(0, os.path.abspath('.'))
 
 # 增加snakerpy的注释类型支持插件搜索路径
@@ -52,6 +54,18 @@ sys.path.append(os.path.join(
     os.path.abspath(os.path.dirname(__file__)),
     os.path.pardir, os.path.pardir, 'HiveNetGRpc'
 ))
+# 尝试执行一次proto的生成
+try:
+    _path = os.path.join(
+        os.path.abspath(os.path.dirname(__file__)),
+        os.path.pardir, os.path.pardir, 'HiveNetGRpc/HiveNetGRpc/proto'
+    )
+    from HiveNetGRpc.proto.proto_generate import ProtoTools
+    ProtoTools.generate_python_proto_by_path(
+        _path, add_hivenet_ref=True
+    )
+except:
+    pass
 # 子项目HiveNetPipeline的检索路径
 sys.path.append(os.path.join(
     os.path.abspath(os.path.dirname(__file__)),
