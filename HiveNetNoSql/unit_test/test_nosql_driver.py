@@ -134,7 +134,8 @@ class DriverTestCaseFW(object):
             'test_special_char2',
             'test_null_data_3',
             'test_json_path_1',
-            'test_left_join_1'
+            'test_left_join_1',
+            'test_transaction_1'
         ]
 
     @property
@@ -2264,6 +2265,138 @@ class DriverTestCaseFW(object):
                 AsyncTools.sync_run_coroutine(self.driver.drop_collection(_tab))
             except:
                 pass
+
+        return (True, _tips, '')
+
+    #############################
+    # 事务处理
+    #############################
+    def test_transaction_1(self):
+        _tips = '测试事务处理1'
+
+        # 获取测试库清单
+        _test_dbs = [_db_info[0] for _db_info in self.test_db_info]
+        AsyncTools.sync_run_coroutine(self.driver.switch_db(_test_dbs[0]))
+
+        # 清空测试表
+        AsyncTools.sync_run_coroutine(self.driver.turncate_collection('tb_full_type'))
+
+        # 插入全类型表
+        _rows = [
+            {'c_index': 'i1', 'c_str': 'remain', 'n_str': 'nstr1'},
+            {'c_index': 'i2', 'c_str': 'remain', 'n_str': 'nstr2'},
+            {'c_index': 'i3', 'c_str': 'update', 'n_str': 'nstr3'},
+            {'c_index': 'i4', 'c_str': 'update', 'n_str': 'nstr4'},
+            {'c_index': 'i5', 'c_str': 'del', 'n_str': 'nstr5'},
+            {'c_index': 'i6', 'c_str': 'del', 'n_str': 'nstr6'}
+        ]
+
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.insert_many('tb_full_type', _rows)
+        )
+
+        if _ret != 6:
+            return (False, _tips, 'insert many 1 error: %s' % str(_ret))
+
+        # 测试事务回滚
+        _session = AsyncTools.sync_run_coroutine(
+            self.driver.start_transaction()
+        )
+
+        # 插入数据
+        _insert_rows = [
+            {'c_index': 'i7', 'c_str': 'insert_rollback', 'n_str': 'nstr7'},
+            {'c_index': 'i8', 'c_str': 'insert_rollback', 'n_str': 'nstr8'}
+        ]
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.insert_many('tb_full_type', _insert_rows, session=_session)
+        )
+
+        if _ret != 2:
+            return (False, _tips, 'insert rollback 2 error: %s' % str(_ret))
+
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type', session=_session)
+        )
+
+        if _ret != 8:
+            return (False, _tips, 'count insert before rollback 3 error: %s' % str(_ret))
+
+        # 更新数据
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.update('tb_full_type', {'c_str': 'update'}, {'$set': {'c_str': 'update1'}}, session=_session)
+        )
+        if _ret != 2:
+            return (False, _tips, 'update rollback 4 error: %s' % str(_ret))
+
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type', filter={'c_str': 'update1'}, session=_session)
+        )
+        if _ret != 2:
+            return (False, _tips, 'count update before rollback 5 error: %s' % str(_ret))
+
+        # 删除数据
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.delete('tb_full_type', {'c_str': 'del'}, session=_session)
+        )
+        if _ret != 2:
+            return (False, _tips, 'delete rollback 6 error: %s' % str(_ret))
+
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type', filter={'c_str': 'del'}, session=_session)
+        )
+        if _ret != 0:
+            return (False, _tips, 'count delete before rollback 7 error: %s' % str(_ret))
+
+        # 回滚
+        AsyncTools.sync_run_coroutine(
+            self.driver.abort_transaction(_session)
+        )
+
+        # 回滚后检查
+        _all_count = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type')
+        )
+        _update_count = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type', filter={'c_str': 'update1'})
+        )
+        _delete_count = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type', filter={'c_str': 'del'})
+        )
+        if not (_all_count == 6 and _update_count == 0 and _delete_count == 2):
+            return (False, _tips, 'count after rollback 8 error: %s' % str((_all_count, _update_count, _delete_count)))
+
+        # 测试事务正常提交
+        _session = AsyncTools.sync_run_coroutine(
+            self.driver.start_transaction()
+        )
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.insert_many('tb_full_type', _insert_rows, session=_session)
+        )
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.update('tb_full_type', {'c_str': 'update'}, {'$set': {'c_str': 'update1'}}, session=_session)
+        )
+        _ret = AsyncTools.sync_run_coroutine(
+            self.driver.delete('tb_full_type', {'c_str': 'del'}, session=_session)
+        )
+
+        # 提交事务
+        AsyncTools.sync_run_coroutine(
+            self.driver.commit_transaction(_session)
+        )
+
+        # 提交后检查
+        _all_count = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type')
+        )
+        _update_count = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type', filter={'c_str': 'update1'})
+        )
+        _delete_count = AsyncTools.sync_run_coroutine(
+            self.driver.query_count('tb_full_type', filter={'c_str': 'del'})
+        )
+        if not (_all_count == 6 and _update_count == 2 and _delete_count == 0):
+            return (False, _tips, 'count after rollback 9 error: %s' % str((_all_count, _update_count, _delete_count)))
 
         return (True, _tips, '')
 
