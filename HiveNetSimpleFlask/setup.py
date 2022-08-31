@@ -35,7 +35,7 @@ DEPENDENCIES = [
     'flask-socketio',
     'gevent-websocket',
     'websocket-client',
-    'werkzeug~=2.0.0',
+    # 'werkzeug~=2.0.0',
 ]
 
 TEST_DEPENDENCIES = []

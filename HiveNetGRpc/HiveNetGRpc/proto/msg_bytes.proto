@@ -7,6 +7,7 @@
 *
 * 说明：
 * 本文件用于定义HiveNetGRpc的通用消息结构
+* 安装包后需执行一次当前目录的 proto_generate.py 生成消息结果代码
 * 编译命令：python -m grpc_tools.protoc -I. --python_out=. --grpc_python_out=. msg_bytes.proto
 * 编译完成后，修改msg_bytes_pb2_grpc.py文件，增加上库路径指定和msg_bytes_pb2对象引入
 * import sys

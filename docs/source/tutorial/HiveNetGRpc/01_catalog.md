@@ -2,7 +2,6 @@
 
 HiveNetGRpc是HiveNetAssemble提供的gRpc的封装, 可以简单实现兼容 HiveNetWebUtils.server.ServerBaseFW 和 HiveNetWebUtils.client.ClientBaseFw 的服务器和客户端功能。
 
-
 ## 安装方法
 
 ### 源码方式安装
@@ -19,7 +18,6 @@ HiveNetGRpc是HiveNetAssemble提供的gRpc的封装, 可以简单实现兼容 Hi
 
 PIPY安装：pip install HiveNetGRpc
 
-
 - 安装包打包（2种方式）
 
 1、python安装包方式：python setup.py sdist
@@ -30,8 +28,9 @@ PIPY安装：pip install HiveNetGRpc
 
 安装：pip install HiveNetGRpc-0.1.0-py3-none-any.whl
 
+- 安装注意事项
 
-
+安装后需要执行一次proto_generate，重新生成系统默认的proto消息结构（应对系统环境不同或grpcio版本不同的情况）
 
 ## 库模块大纲
 
@@ -61,9 +60,6 @@ proto包提供HiveNetGRpc默认支持的消息定义，包括：
 msg_formater模块提供HiveNetGRpc默认支持消息格式化处理类，包括：
 
 - RemoteCallFormater - 远程调用函数的消息格式化类，该类基于默认的JsonService报文格式进行处理，可以便捷地实现客户端通过gRpc方式对远程服务端函数的调用。
-
-
-
 
 ## HiveNetGRpc使用说明
 
@@ -155,12 +151,12 @@ import xxx.msg_json_pb2 as msg__json__pb2
 
 ```
 def deal_func(request: dict) -> msg_test_pb2.RpcResponse:
-	"""服务端处理函数"""
-	# 自定义的处理逻辑
-	...
-	
-	# 返回响应对象 RpcResponse
-	...
+    """服务端处理函数"""
+    # 自定义的处理逻辑
+    ...
+
+    # 返回响应对象 RpcResponse
+    ...
 ```
 
 注意，处理函数的入参和出参是需要根据不同的服务管理类（Servicer）进行定义，如果使用默认的GRpcServicer，函数定义说明如下：
@@ -176,7 +172,7 @@ def deal_func(request: dict) -> msg_test_pb2.RpcResponse:
     注意: 如果call_mode为ClientSideStream或BidirectionalStream，客户端通过流方式发送数据，则请求对象为迭代器，可以通过 __anext__()来逐个进行获取，参考代码如下：
     while True:
         try:
-        	  # 逐个获取客户端发送过来的请求
+              # 逐个获取客户端发送过来的请求
             _item: xxx_pb2.RpcRequest = AsyncTools.sync_run_coroutine(
                 request_iter.__anext__()
             )
@@ -184,16 +180,16 @@ def deal_func(request: dict) -> msg_test_pb2.RpcResponse:
             ...
         except StopAsyncIteration:
             break
-    
+
 （2）函数的返回值为xxx_pb2.RpcResponse或xxx_pb2.RpcResponse的迭代对象，如果call_mode为ServerSideStream和BidirectionalStream，服务端应通过流方式返回数据，需要返回异步IO的迭代对象，参考处理函数的返回方式如下：
-	async def deal_fun(request):
-		  # 请求处理逻辑
-		  ...
-		  # 流方式返回处理结果
-		  for xx in xxx:
-		  	...
-		  	_ret: xxx_pb2.RpcResponse = ...
-		  	yield _ret
+    async def deal_fun(request):
+          # 请求处理逻辑
+          ...
+          # 流方式返回处理结果
+          for xx in xxx:
+              ...
+              _ret: xxx_pb2.RpcResponse = ...
+              yield _ret
 ```
 
 #### 4、gRpc服务端代码
@@ -204,8 +200,8 @@ def deal_func(request: dict) -> msg_test_pb2.RpcResponse:
 # 创建服务管理类的映射字典, key为服务名, value维护服务管理类实例对象, 可以支持送入多个服务管理类
 # 如果不需要自定义服务管理类可以不送该参数, 服务端会默认使用JsonService(msg_json格式)和GRpcServicer作为默认的服务管理类
 _servicer_mapping = {
-	'JsonService': GRpcServicer(...),
-	'BytesService': GRpcServicer(...)
+    'JsonService': GRpcServicer(...),
+    'BytesService': GRpcServicer(...)
 }
 
 # 初始化gRpc服务对象
@@ -238,14 +234,12 @@ with AIOGRpcClient({
     'use_sync_client': False, 'timeout': 3
 }) as _client:
   _request = xxx_pb2.RpcRequest(
-  	xx1='value1', xx2='value2', ...
+      xx1='value1', xx2='value2', ...
   )
-	_result = AsyncTools.sync_run_coroutine(client.call(
+    _result = AsyncTools.sync_run_coroutine(client.call(
       'my_deal_func_uri', _request, call_mode=EnumCallMode.Simple
   ))
 ```
-
-
 
 ### 通过RemoteCallFormater实现函数远程调用
 
@@ -273,8 +267,8 @@ async def service_client_stream(request, a, b, c=10):
     for _item in request['request']:
         d += _item
     return [a, b, c, d]
-    
-    
+
+
 @RemoteCallFormater.format_service(with_request=True)
 async def service_server_stream_async(request, a, b, *args, c=10, d={'d1': 'd1value'}, **kwargs):
     """
@@ -292,8 +286,6 @@ async def service_server_stream_async(request, a, b, *args, c=10, d={'d1': 'd1va
 （2）该修饰符可以同时支持流模式和普通模式，如果为客户端流，with_request固定为True（设置了False也没有用），处理函数需要从request['request']中获取对应的迭代对象进行循环处理；
 
 （3）返回值可以支持直接返回python对象（注意需要能转换为json的对象）；如果为服务端流，则需要通过yield方式返回迭代对象。
-
-
 
 **2、服务端处理，初始化无需指定servicer_mapping**
 
@@ -325,8 +317,6 @@ AsyncTools.sync_run_coroutine(_server.add_service(
 AsyncTools.sync_run_coroutine(_server.start(is_asyn=False))
 ```
 
-
-
 3、客户端处理，通过RemoteCallFormater工具处理请求和返回值
 
 ```
@@ -334,7 +324,7 @@ with AIOGRpcClient({
     'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
     'use_sync_client': False, 'timeout': 3
 }) as _client:
-		# 将远程函数的入参转换为标准请求函数
+        # 将远程函数的入参转换为标准请求函数
     _request = RemoteCallFormater.paras_to_grpc_request(
         ['a_val', 'b_val', 'fixed_add1', 'fixed_add2'],
         {
@@ -347,7 +337,7 @@ with AIOGRpcClient({
     ))
     # 将返回值转换为标准的CResult对象，如果成功，_result.resp为对应的返回值
     _result = RemoteCallFormater.format_call_result(_result)
-    
+
     # 客户端流的调用方式
     _request = RemoteCallFormater.paras_to_grpc_request_iter(
         [1, 2, 3, 4],
@@ -361,8 +351,6 @@ with AIOGRpcClient({
     ))
     _result = RemoteCallFormater.format_call_result(_result)
 ```
-
-
 
 ### 客户端使用连接池管理
 
@@ -393,8 +381,6 @@ client = AsyncTools.sync_run_coroutine(_pool.connection())
 # 退回连接对象到连接池
 AsyncTools.sync_run_coroutine(client.close())
 ```
-
-
 
 ### 使用SSL/TSL进行安全验证
 
@@ -434,8 +420,6 @@ HiveNetGRpc支持通过SSL/TSL进行验证，包括服务端验证和客户端�
 # openssl pkcs8 -topk8 -nocrypt -in server.key -out server.pem
 ```
 
-
-
 **2、服务器端单向验证**
 
 服务器端可以验证客户端的证书是否有效，参考代码如下：
@@ -464,10 +448,8 @@ with AIOGRpcClient({
         'use_sync_client': False, 'timeout': 3,
         'use_ssl': True, 'root_certificates': os.path.join(self.ca_path, 'server.crt')
 }) as _client:
-	...
+    ...
 ```
-
-
 
 **3、双向验证（服务器验证客户端，客户端验证服务器）**
 
@@ -503,6 +485,5 @@ with AIOGRpcClient({
             'key': os.path.join(self.ca_path, 'client.pem')
         }
 }) as _client:
-	...
+    ...
 ```
-

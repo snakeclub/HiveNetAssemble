@@ -23,12 +23,6 @@ from HiveNetGRpc.client import AIOGRpcClient, GRpcClient, GRpcPoolConnection
 from HiveNetGRpc.msg_formater import RemoteCallFormater
 
 
-#############################
-# 指定测试异步IO服务还是同步服务
-#############################
-TEST_SERVER_ASYNC = True
-
-
 @RemoteCallFormater.format_service(with_request=False)
 async def service_simple_call_para(a, b, *args, c=10, d={'d1': 'd1value'}, **kwargs):
     """
@@ -43,22 +37,22 @@ class TestFunction(object):
     """
 
     @staticmethod
-    def test_connection_pool(case_obj, is_async):
+    def test_connection_pool(case_obj, is_async, port):
         """
         测试测试连接池
         """
         if is_async:
-            # 异步模式
+            # 客户端异步模式
             _creator = AIOGRpcClient
             _connect_config = {
-                'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+                'host': '127.0.0.1', 'port': port, 'ping_on_connect': True, 'ping_with_health_check': True,
                 'use_sync_client': False, 'timeout': 3
             }
         else:
-            # 同步模式
+            # 客户端同步模式
             _creator = GRpcClient
             _connect_config = {
-                'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+                'host': '127.0.0.1', 'port': port, 'ping_on_connect': True, 'ping_with_health_check': True,
                 'use_sync_client': True, 'timeout': 3
             }
 
@@ -125,7 +119,7 @@ class TestFunction(object):
 
 class TestGRpcJsonService(unittest.TestCase):
     """
-    测试JsonService的grpc服务(连接池)
+    测试JsonService的grpc服务(连接池) - 同步grpc
     """
 
     @classmethod
@@ -134,15 +128,19 @@ class TestGRpcJsonService(unittest.TestCase):
         启动测试类执行的初始化，只执行一次
         """
         # 测试没有ssl的服务
-        if TEST_SERVER_ASYNC:
+        if True:
+            # 指定测试异步IO服务
             _grpc_server_class = AIOGRpcServer
         else:
+            # 指定测试同步IO服务
             _grpc_server_class = GRpcServer
 
+        cls._port = 50051
+        cls._server_name = 'server_no_ssl'
         cls.server_no_ssl = _grpc_server_class(
-            'server_no_ssl', server_config={
+            cls._server_name, server_config={
                 'run_config': {
-                    'host': '127.0.0.1', 'port': 50051, 'workers': 2,
+                    'host': '127.0.0.1', 'port': cls._port, 'workers': 2,
                     'enable_health_check': True
                 }
             }
@@ -173,11 +171,72 @@ class TestGRpcJsonService(unittest.TestCase):
 
     def test_test_connection_pool_async(self):
         print('测试连接池处理(协程模式)')
-        TestFunction.test_connection_pool(self, True)
+        TestFunction.test_connection_pool(self, True, self._port)
 
     def test_test_connection_pool_sync(self):
         print('测试连接池处理(同步模式)')
-        TestFunction.test_connection_pool(self, False)
+        TestFunction.test_connection_pool(self, False, self._port)
+
+
+class TestGRpcJsonServiceAsync(unittest.TestCase):
+    """
+    测试JsonService的grpc服务(连接池) - 异步grpc
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        """
+        启动测试类执行的初始化，只执行一次
+        """
+        # 测试没有ssl的服务
+        if True:
+            # 指定测试异步IO服务
+            _grpc_server_class = AIOGRpcServer
+        else:
+            # 指定测试同步IO服务
+            _grpc_server_class = GRpcServer
+
+        cls._port = 50052
+        cls._server_name = 'server_no_ssl_async'
+        cls.server_no_ssl = _grpc_server_class(
+            cls._server_name, server_config={
+                'run_config': {
+                    'host': '127.0.0.1', 'port': cls._port, 'workers': 2,
+                    'enable_health_check': True
+                }
+            }
+        )
+
+        # 加载服务Simple
+        _service_uri = 'service_simple_call_para'
+        _result = AsyncTools.sync_run_coroutine(cls.server_no_ssl.add_service(
+            _service_uri, service_simple_call_para,
+        ))
+
+        # 启动服务
+        _result = AsyncTools.sync_run_coroutine(cls.server_no_ssl.start(is_asyn=True))
+        if not _result.is_success():
+            raise RuntimeError('start server no ssl error: %s' % str(_result))
+
+    @classmethod
+    def tearDownClass(cls):
+        """
+        结束测试类执行的销毁，只执行一次
+        """
+        # 停止服务
+        _result = AsyncTools.sync_run_coroutine(
+            cls.server_no_ssl.stop()
+        )
+        if not _result.is_success():
+            print('stop server no ssl error: %s' % str(_result))
+
+    def test_test_connection_pool_async(self):
+        print('测试连接池处理(协程模式)')
+        TestFunction.test_connection_pool(self, True, self._port)
+
+    def test_test_connection_pool_sync(self):
+        print('测试连接池处理(同步模式)')
+        TestFunction.test_connection_pool(self, False, self._port)
 
 
 if __name__ == '__main__':

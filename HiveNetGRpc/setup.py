@@ -28,7 +28,8 @@ DEPENDENCIES = [
     'HiveNetWebUtils>=0.1.1',
     'grpcio>=1.21.1',
     'grpcio-health-checking>=1.21.1',
-    'googleapis-common-protos'
+    'googleapis-common-protos',
+    'grpcio-tools'
 ]
 
 TEST_DEPENDENCIES = []
@@ -61,6 +62,9 @@ setup(
         'Programming Language :: Python :: 3.6',
         'Topic :: Software Development :: Libraries'
     ],
+    entry_points={'console_scripts': [
+        "proto_generate=HiveNetGRPC.proto.proto_generate:main"
+    ]},
     # 此项需要, 否则卸载时报windows error
     zip_safe=False
 )

@@ -38,11 +38,6 @@ TEST_CONTROL = {
     'test_class_menthod_call_sync': True
 }
 
-#############################
-# 指定测试异步IO服务还是同步服务
-#############################
-TEST_SERVER_ASYNC = True
-
 
 #############################
 # 生命周期执行函数
@@ -693,6 +688,9 @@ class TestGRpcJsonService(unittest.TestCase):
     """
     测试JsonService的grpc服务
     """
+    _port = 50051
+    _server_name = 'server_no_ssl'
+    TEST_SERVER_ASYNC = False
 
     @classmethod
     def setUpClass(cls):
@@ -700,15 +698,15 @@ class TestGRpcJsonService(unittest.TestCase):
         启动测试类执行的初始化，只执行一次
         """
         # 测试没有ssl的服务
-        if TEST_SERVER_ASYNC:
+        if cls.TEST_SERVER_ASYNC:
             _grpc_server_class = AIOGRpcServer
         else:
             _grpc_server_class = GRpcServer
 
         cls.server_no_ssl = _grpc_server_class(
-            'server_no_ssl', server_config={
+            cls._server_name, server_config={
                 'run_config': {
-                    'host': '127.0.0.1', 'port': 50051, 'workers': 2,
+                    'host': '127.0.0.1', 'port': cls._port, 'workers': 2,
                     'enable_health_check': True
                 }
             },
@@ -838,7 +836,7 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试简单模式调用(协程模式)')
         # 建立连接
         with AIOGRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': False, 'timeout': 3
         }) as _client:
             TestFunction.test_simple_call(self, _client, True)
@@ -850,7 +848,7 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试简单模式调用(同步模式)')
         # 建立连接
         with GRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': True, 'timeout': 3
         }) as _client:
             TestFunction.test_simple_call(self, _client, False)
@@ -862,7 +860,7 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试客户端流模式调用(协程模式)')
         # 建立连接
         with AIOGRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': False, 'timeout': 5
         }) as _client:
             TestFunction.test_client_stream_call(self, _client, True)
@@ -874,7 +872,7 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试客户端流模式调用(同步模式)')
         # 建立连接
         with GRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': True, 'timeout': 5
         }) as _client:
             TestFunction.test_client_stream_call(self, _client, False)
@@ -886,7 +884,7 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试服务端流模式调用(协程模式)')
         # 建立连接
         with AIOGRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': False, 'timeout': 5
         }) as _client:
             TestFunction.test_server_stream_call(self, _client, True)
@@ -898,7 +896,7 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试服务端流模式调用(同步模式)')
         # 建立连接
         with GRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': True, 'timeout': 5
         }) as _client:
             TestFunction.test_server_stream_call(self, _client, False)
@@ -910,7 +908,7 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试双向流模式调用(协程模式)')
         # 建立连接
         with AIOGRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': False, 'timeout': 5
         }) as _client:
             TestFunction.test_bidirectional_stream_call(self, _client, True)
@@ -922,7 +920,7 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试服务端流模式调用(协程模式)')
         # 建立连接
         with GRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': True, 'timeout': 5
         }) as _client:
             TestFunction.test_bidirectional_stream_call(self, _client, False)
@@ -934,7 +932,7 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试类函数及实例函数调用(协程模式)')
         # 建立连接
         with AIOGRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': False, 'timeout': 5
         }) as _client:
             TestFunction.test_class_menthod_call(self, _client, True)
@@ -946,10 +944,19 @@ class TestGRpcJsonService(unittest.TestCase):
         print('测试类函数及实例函数调用(同步模式)')
         # 建立连接
         with GRpcClient({
-            'host': '127.0.0.1', 'port': 50051, 'ping_on_connect': True, 'ping_with_health_check': True,
+            'host': '127.0.0.1', 'port': self._port, 'ping_on_connect': True, 'ping_with_health_check': True,
             'use_sync_client': True, 'timeout': 5
         }) as _client:
             TestFunction.test_class_menthod_call(self, _client, False)
+
+
+class TestGRpcJsonServiceAsync(TestGRpcJsonService):
+    """
+    测试JsonService的grpc服务 - 异步服务
+    """
+    _port = 50052
+    _server_name = 'server_no_ssl_async'
+    TEST_SERVER_ASYNC = True
 
 
 if __name__ == '__main__':
