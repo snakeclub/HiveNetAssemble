@@ -19,7 +19,7 @@ import threading
 import queue
 import uuid
 import gevent
-from pyparsing import traceback
+import traceback
 import socketio
 from HiveNetCore.generic import CResult
 from HiveNetCore.queue_hivenet import MemoryQueue
