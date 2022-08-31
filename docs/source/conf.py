@@ -21,7 +21,6 @@ from recommonmark.transform import AutoStructify
 import os
 import sys
 
-from torch import R
 sys.path.insert(0, os.path.abspath('.'))
 
 # 增加snakerpy的注释类型支持插件搜索路径
