@@ -824,7 +824,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         if projection is not None:
             # 标准化
             _projection = projection
-            if type(projection) != dict:
+            if not isinstance(projection, dict):
                 _projection = {}
                 for _item in projection:
                     _projection[_item] = True
@@ -842,7 +842,7 @@ class MongoNosqlDriver(NosqlDriverFW):
         )
         # 逐个返回值处理 _id 的分组字典
         async for _doc in _cursor:
-            if _deal_group and type(_doc['_id']) == dict:
+            if _deal_group and isinstance(_doc['_id'], dict):
                 _doc.pop('_id', {})
             _ret_list.append(_doc)
 
@@ -911,7 +911,7 @@ class MongoNosqlDriver(NosqlDriverFW):
             if _type == str:
                 # 需要转换为ObjectId
                 filter['_id'] = ObjectId(_id)
-            elif _type == dict:
+            elif isinstance(_id, dict):
                 if filter['_id'].get('$in', None) is not None:
                     filter['_id']['$in'] = [ObjectId(_temp_id) for _temp_id in filter['_id']['$in']]
 
@@ -975,7 +975,7 @@ class MongoNosqlDriver(NosqlDriverFW):
             _type = type(_std_val)
             if _type == str:
                 _std_val = ObjectId(_std_val)
-            elif _type == dict:
+            elif isinstance(_std_val, dict):
                 if _std_val.get('$in', None) is not None:
                     _std_val['$in'] = [ObjectId(_temp_id) for _temp_id in _std_val['$in']]
 
@@ -1052,7 +1052,7 @@ class MongoNosqlDriver(NosqlDriverFW):
             return _col, _tab_as_name
 
         _project = {}
-        if type(project) == dict:
+        if isinstance(project, dict):
             # 字典形式
             for _key, _show in project.items():
                 if type(_show) == str and _show[0] == '$':

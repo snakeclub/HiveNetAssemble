@@ -103,7 +103,7 @@ class AppKeyAuthFlask(AppKeyAuth):
             # 是鉴权不通过的情况
             _status, _err_msg = resp
             if self.sign_resp:
-                if type(_err_msg) != dict:
+                if not isinstance(_err_msg, dict):
                     _err_msg = {'err_msg': _err_msg}
                 _err_msg['app_id'] = app_id
                 _err_msg = self.sign(_err_msg)

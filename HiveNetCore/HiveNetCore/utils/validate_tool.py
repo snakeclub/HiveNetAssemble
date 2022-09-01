@@ -754,8 +754,7 @@ class ValidateTool(object):
         @return {CResult} - 检查结果, '00000' - 检查成功, 其他 - 检查失败
 
         """
-        _rule_type = type(rule)
-        if _rule_type == dict:
+        if isinstance(rule, dict):
             # 按字典遍历进行检查
             if not is_list_call and type(obj) in [list, tuple]:
                 # 字典规则对列表时, 拆分列表检查, 相当于多行检查, 调用自己进行处理
@@ -777,7 +776,7 @@ class ValidateTool(object):
             else:
                 _pre_obj_id = '' if obj_id == '' else ('%s%s->' % (pre_obj_id, obj_id))
                 # 检查对象是否字典, 如果不是要返回失败
-                if type(obj) != dict:
+                if not isinstance(obj, dict):
                     _show_obj_id = obj_id if not is_use_pre_obj_id else (_pre_obj_id + obj_id)
                     return CResult(code='19999', msg=VALIDATE_ERR_MSG['OBJ_MUST_DICT'],
                                    i18n_obj=i18n_obj, i18n_msg_paras=(obj, _show_obj_id, ''))
@@ -797,7 +796,7 @@ class ValidateTool(object):
 
                     # key存在
                     _result = None
-                    if type(rule[_key]) == dict:
+                    if isinstance(rule[_key], dict):
                         # 下一级还是dict, 递归处理
                         _option_rule = None
                         if option_rule is not None:
@@ -919,7 +918,7 @@ class ValidateTool(object):
         # 如果是组合逻辑函数, 需要修改入参
         _is_logic_fun = (_check_fun_str in VALIDATE_LOGIC_FUN_NAME)
         if _is_logic_fun:
-            if _kwargs is None or type(_kwargs) != dict:
+            if _kwargs is None or not isinstance(_kwargs, dict):
                 _kwargs = dict()
             # 传入obj_id, i18n_obj
             _kwargs['obj_id'] = obj_id
@@ -1034,7 +1033,7 @@ class ValidateTool(object):
             while _index < _obj_len:
                 _show_obj_id = obj_id if not is_use_pre_obj_id else ('%s~%d' % (obj_id, _index))
                 _check_rule_fun = cls._check_by_single_rule
-                if type(rules[_index]) == dict:
+                if isinstance(rules[_index], dict):
                     # 字典形式的校验
                     _check_rule_fun = cls.check_by_rule
 

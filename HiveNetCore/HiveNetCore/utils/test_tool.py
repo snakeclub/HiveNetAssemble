@@ -69,7 +69,7 @@ class TestTool(object):
                             src_data[i], dst_data[i], print_if_diff=False
                         )
                         # print('list is_sub_same:'+str(is_sub_same) + str(i))
-                    elif type(src_data[i]) == dict:
+                    elif isinstance(src_data[i], dict):
                         # 值为dict的情况
                         is_sub_same = cls.cmp_dict(
                             src_data[i], dst_data[i], list_sorted=sorted, print_if_diff=False
@@ -121,7 +121,7 @@ class TestTool(object):
             if operator.eq(src_key, dst_key):
                 is_break = False
                 for key in src_data.keys():
-                    if type(src_data[key]) == dict:
+                    if isinstance(src_data[key], dict):
                         # 值是字典, 递归判断
                         if not cls.cmp_dict(src_data[key], dst_data[key], list_sorted=list_sorted, print_if_diff=False):
                             print('cmp_dict: value difference in key "%s"!' % (key))

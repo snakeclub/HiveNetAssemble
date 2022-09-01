@@ -795,7 +795,7 @@ class SimpleXml(object):
         for _key in value_dict.keys():
             _value = value_dict[_key]
             _value_type = type(_value)
-            if _value_type == dict:
+            if isinstance(_value_type, dict):
                 # 如果值为字典, 按下一个层级处理
                 _sub_exception_list = self.set_value_by_dict(
                     '%s%s' % (_xpath, _key), _value,

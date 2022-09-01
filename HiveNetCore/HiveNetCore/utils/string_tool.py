@@ -74,7 +74,7 @@ class JsonHiveNetDecoder(json.JSONDecoder):
 
         @returns {Any} - 返回真实对象
         """
-        if type(d) == dict:
+        if isinstance(d, dict):
             _extend_type = d.get('__extend_type__', None)
             if _extend_type == 'bytes':
                 return bytes.fromhex(d['value'])
@@ -404,7 +404,7 @@ class StringTool(object):
                         )
                     )
                     _index = _index + 1
-            elif type(deal_obj) == dict:
+            elif isinstance(deal_obj, dict):
                 # 字典
                 for _key in deal_obj.keys():
                     _retstr = (

@@ -117,7 +117,7 @@ class ValueTool(object):
         for _dict in args:
             for _key, _val in _dict.items():
                 # 逐个key进行合并处理
-                if _key not in base_dict.keys() or type(base_dict[_key]) != dict or type(_val) != dict:
+                if _key not in base_dict.keys() or not isinstance(base_dict[_key], dict) or not isinstance(_val, dict):
                     # 非字典形式, 直接覆盖即可
                     base_dict[_key] = _val
                     continue

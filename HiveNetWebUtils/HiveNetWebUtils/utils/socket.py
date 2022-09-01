@@ -116,7 +116,7 @@ class SocketTool(object):
             result.recv_time : datetime 实际开始接受数据时间
             result.overtime : float 超时时间(秒), 当返回结果为超时, 可获取超时时间信息
         """
-        if type(recv_para) != dict:
+        if not isinstance(recv_para, dict):
             recv_para = {}
 
         _result = CResult('00000')
@@ -175,7 +175,7 @@ class SocketTool(object):
             result.send_time : datetime 实际发送完成时间
             result.overtime : float 超时时间(秒), 当返回结果为超时, 可获取超时时间信息
         """
-        if type(send_para) != dict:
+        if not isinstance(send_para, dict):
             send_para = {}
 
         _result = CResult('00000')

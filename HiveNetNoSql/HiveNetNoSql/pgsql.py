@@ -644,7 +644,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
                     #     _col_name, _path, self._dbtype_cast_mapping[_col_type]
                     # )
 
-        if type(val) == dict:
+        if isinstance(val, dict):
             # 有特殊规则
             _cds = []  # 每个规则的数组
             for _op, _para in val.items():
@@ -949,7 +949,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
 
         # 标准化要显示的字段清单
         _projection = {}
-        if type(projection) == dict:
+        if isinstance(projection, dict):
             for _key, _show in projection.items():
                 if type(_show) == str and _show[0] == '$':
                     _col, _tab_as_name, _tab_as_name_sql = _get_join_col_info(
@@ -1173,7 +1173,7 @@ class PgSQLNosqlDriver(NosqlAIOPoolDriver):
         _groupby = []
         for _key, _val in group.items():
             _val_type = type(_val)
-            if _val_type == dict:
+            if isinstance(_val, dict):
                 # 是聚合函数
                 _op = list(_val.keys())[0]
                 _col = _val[_op]

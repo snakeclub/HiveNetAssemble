@@ -3289,7 +3289,7 @@ class MongoDriverTestCase(DriverTestCaseFW):
 class TestSQLiteDriver(unittest.TestCase):
 
     def test(self):
-        return
+        # return
         # 初始化驱动
         _case = SQLiteDriverTestCase()
 

@@ -107,7 +107,7 @@ class NullObj(object):
         """
         _obj = NullObj()
         for _key in obj_dict.keys():
-            if type(obj_dict[_key]) == dict:
+            if isinstance(obj_dict[_key], dict):
                 # 还是字典, 继续往下一层处理
                 exec('_obj.%s = NullObj.get_nullobj_from_dict(obj_dict[_key])' % (_key))
             else:

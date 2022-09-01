@@ -700,7 +700,7 @@ class GRpcPushProtocol(LocalProtocol):
 
             # 等待文件数据获取结果
             _info_dict = _writer_prop['ret_queue'].get()
-            if type(_info_dict) != dict:
+            if not isinstance(_info_dict, dict):
                 # 如果不是字典, 则为异常对象
                 raise _info_dict
 

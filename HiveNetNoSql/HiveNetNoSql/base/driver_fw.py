@@ -663,7 +663,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
 
         _type = type(cmp_val)
         _ret_val = list(query_ret[0].values())[0]
-        if _type == dict:
+        if isinstance(cmp_val, dict):
             return TestTool.cmp_dict(_ret_val, cmp_val, print_if_diff=False)
         elif _type in (list, tuple):
             return TestTool.cmp_list(_ret_val, cmp_val, print_if_diff=False)
@@ -1364,7 +1364,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
             _row = {}
             if _filter is not None:
                 for _key, _val in _filter.items():
-                    if _key[0] != '$' and type(_val) != dict:
+                    if _key[0] != '$' and not isinstance(_val, dict):
                         _row[_key] = _val
 
             for _op, _para in update.items():
