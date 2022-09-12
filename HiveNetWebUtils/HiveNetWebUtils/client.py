@@ -17,12 +17,14 @@ import os
 import copy
 import ssl
 import traceback
+import json as def_json
 from typing import Any
 import aiohttp
 from aiohttp.http import HttpVersion
 from HiveNetCore.generic import CResult
 from HiveNetCore.utils.run_tool import AsyncTools
 from HiveNetCore.utils.string_tool import StringTool
+from sanic import json
 # 根据当前文件路径将包路径纳入，在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 
@@ -209,7 +211,7 @@ class AIOHttpClient(ClientBaseFw):
         pass
 
     async def call(self, service_uri: str, request: Any = None, headers: dict = {}, method: str = 'GET',
-            timeout: float = None, bytes_read_size: int = -1, **kwargs) -> CResult:
+            timeout: float = None, bytes_read_size: int = -1, debug: bool = False, **kwargs) -> CResult:
         """
         执行远程调用
 
@@ -221,6 +223,7 @@ class AIOHttpClient(ClientBaseFw):
         @param {str} method='GET' - 请求的方法
         @param {float} timeout=None - 指定本次请求的超时时间
         @param {int} bytes_read_size=-1 - 二进制数据读取缓存大小, 如果设置为-1代表一次性读取所有内容
+        @param {bool} debug=False - 是否debug, 如果为True打印请求和返回内容
         @param {kwargs} - aiohttp.ClientSession.request的其他可选参数
 
         @returns {CResult} - 执行结果CResult
@@ -255,6 +258,22 @@ class AIOHttpClient(ClientBaseFw):
             ) as _session:
                 # 真正进行调用
                 try:
+                    if debug:
+                        # 打印请求信息
+                        print(method, _url)
+                        print('headers:')
+                        if _headers is not None:
+                            print(def_json.dumps(_headers, ensure_ascii=False, indent=2))
+                        print('body:')
+                        if _send_data is not None:
+                            if _headers is not None and headers.get('Content-Type', '') == 'application/octet-stream':
+                                # 二进制数据
+                                print(StringTool.bytes_to_hex(_send_data))
+                            else:
+                                # 字符串格式
+                                print(str(_send_data, encoding='utf-8'))
+
+                    # 进行请求
                     async with _session.request(
                         method, _url, data=_send_data, ssl=self._ssl, **_aiohttp_request_paras
                     ) as _response:
@@ -263,7 +282,7 @@ class AIOHttpClient(ClientBaseFw):
                         _std_resp['status'] = _response.status
                         _std_resp['headers'] = {}
                         for _item in _response.headers.items():
-                            _std_resp['headers'][_item[0].lower()] = _item[1]
+                            _std_resp['headers'][_item[0]] = _item[1]
 
                         # 获取内容
                         if bytes_read_size > 0:
@@ -275,6 +294,23 @@ class AIOHttpClient(ClientBaseFw):
                             _std_resp['data'] = await _response.read()
                             if _std_resp['status'] == 200 and _std_resp['data'] == '':
                                 _std_resp['data'] = None
+
+                        # 打印返回信息
+                        if debug:
+                            print('')
+                            print('Resp Url: %s' % _std_resp['url'])
+                            print('Resp Status: %d' % _std_resp['status'])
+                            print('headers:')
+                            if _std_resp['headers'] is not None:
+                                print(def_json.dumps(_std_resp['headers'], ensure_ascii=False, indent=2))
+                            print('body:')
+                            if _std_resp['data'] is not None:
+                                if _std_resp.get('headers', {}).get('Content-Type', '') == 'application/octet-stream':
+                                    # 二进制数据
+                                    print(StringTool.bytes_to_hex(_std_resp['data']))
+                                else:
+                                    # 字符串格式
+                                    print(str(_std_resp['data'], encoding='utf-8'))
 
                         # 返回处理结果
                         _result = CResult(code='00000')
@@ -424,7 +460,7 @@ class HttpClient(AIOHttpClient):
         )
 
     def call(self, service_uri: str, request: Any = None, headers: dict = {}, method: str = 'GET',
-            timeout: float = None, bytes_read_size: int = -1, **kwargs) -> CResult:
+            timeout: float = None, bytes_read_size: int = -1, debug: bool = False, **kwargs) -> CResult:
         """
         执行远程调用
 
@@ -436,6 +472,7 @@ class HttpClient(AIOHttpClient):
         @param {str} method='GET' - 请求的方法
         @param {float} timeout=None - 指定本次请求的超时时间
         @param {int} bytes_read_size=-1 - 二进制数据读取缓存大小, 如果设置为-1代表一次性读取所有内容
+        @param {bool} debug=False - 是否debug, 如果为True打印请求和返回内容
         @param {kwargs} - aiohttp.ClientSession.request的其他可选参数
 
         @returns {CResult} - 执行结果CResult
@@ -448,6 +485,6 @@ class HttpClient(AIOHttpClient):
         return AsyncTools.sync_run_coroutine(
             super().call(
                 service_uri, request, headers=headers, method=method, timeout=timeout,
-                bytes_read_size=bytes_read_size, **kwargs
+                bytes_read_size=bytes_read_size, debug=debug, **kwargs
             )
         )
