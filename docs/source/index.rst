@@ -20,6 +20,7 @@ Welcome to HiveNetAssemble's documentation!
    HiveNetConsole/modules
    HiveNetFileTransfer/modules
    HiveNetNoSql/modules
+   HiveNetBuildTool/modules
 
 
 Indices and tables

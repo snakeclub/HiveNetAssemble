@@ -114,3 +114,11 @@ HiveNetNoSql
 
    tutorial/HiveNetNoSql/*
 
+
+HiveNetBuildTool
+----------------
+
+.. toctree::
+   :glob:
+
+   tutorial/HiveNetBuildTool/*

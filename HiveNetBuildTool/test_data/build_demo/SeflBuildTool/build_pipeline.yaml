@@ -1,0 +1,11 @@
+# 构建管道配置
+"1":
+  name: 构建应用文件夹（使用框架自带的构建插件）
+  processor: ProcesserBuildDir  # 管道插件处理器标识
+  context:
+    current_key: dirs  # 设置上下文, 指定该节点的配置标识
+"2":
+  name: 示例处理（使用自定义的构建插件）
+  processor: ProcesserBuildDemo
+  context:
+    current_key: demoKey

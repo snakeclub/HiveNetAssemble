@@ -8,43 +8,34 @@
 #  file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 
-"""The setup.py file for Python HiveNetAssemble."""
+"""The setup.py file for Python HiveNetBuildTool."""
 
 import sys
 from setuptools import setup, find_packages
 
 
 LONG_DESCRIPTION = """
-Hivenetassemble is a set of Python libraries convenient for developers to use. It aims to enable developers to realize the most commonly used functions in the simplest way, improve development efficiency, and pay attention to specific function logic rather than specific technical implementation.
+HiveNetBuildTool is a universal code building tool of HiveNetAssembly. It provides a code extensible code building framework based on the execution of HiveNetPipeline. Different applications can quickly implement custom building logic by developing HiveNetPipeline process plugins.
 
-HiveNetAssemble 一组方便开发人员使用的Python库集合, 旨在让开发人员用最简单的方法实现最常用的功能, 提高开发效率, 关注具体功能逻辑而非具体技术实现。
+HiveNetBuildTool是HiveNetAssemble的通用代码构建工具, 基于HiveNetPipeline管道执行的方式提供代码可扩展的代码构建框架, 不同应用可通过开发HiveNetPipeline管道插件的方式快速实现自定义的构建逻辑。
 """.strip()
 
 SHORT_DESCRIPTION = """
-A collection of Python libraries that are easy for developers to use.""".strip()
+A universal code building tool.""".strip()
 
 DEPENDENCIES = [
-    'HiveNetCore==0.1.2',
-    'HiveNetWebUtils==0.1.1',
-    'HiveNetSimpleSanic==0.1.2',
-    'HiveNetSimpleFlask==0.1.0',
-    'HiveNetGRpc==0.1.0',
-    'HiveNetPipeline==0.1.0',
-    'HiveNetPromptPlus==0.1.0',
-    'HiveNetConsole==0.1.0',
-    'HiveNetFileTransfer==0.1.0',
-    'HiveNetNoSql==0.1.0',
-    'HiveNetBuildTool==0.1.0'
+    'HiveNetPipeline>=0.1.0',
 ]
+
 
 TEST_DEPENDENCIES = []
 
-VERSION = '0.1.0'
-URL = 'https://github.com/snakeclub/HiveNetAssemble'
+VERSION = '0.1.1'
+URL = 'https://github.com/snakeclub/HiveNetAssemble/HiveNetBuildTool'
 
 setup(
     # pypi中的名称, pip或者easy_install安装时使用的名称
-    name="HiveNetAssemble",
+    name="HiveNetBuildTool",
     version=VERSION,
     author="黎慧剑",
     author_email="snakeclub@163.com",
@@ -53,7 +44,7 @@ setup(
     description=SHORT_DESCRIPTION,
     long_description=LONG_DESCRIPTION,
     license="Mozilla Public License 2.0",
-    keywords="HiveNetAssemble development python lib",
+    keywords="HiveNetAssemble HiveNetBuildTool development python lib",
     url=URL,
     platforms=["all"],
     # 需要打包的目录列表, 可以指定路径packages=['path1', 'path2', ...]

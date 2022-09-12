@@ -27,7 +27,8 @@ if __name__ == '__main__':
         'HiveNetPromptPlus',
         'HiveNetConsole',
         'HiveNetFileTransfer',
-        'HiveNetNoSql'
+        'HiveNetNoSql',
+        'HiveNetBuildTool'
     ]
     _pyenv_tool_file = os.path.abspath(os.path.join(
         os.path.dirname(__file__), 'HiveNetCore/HiveNetCore/utils/pyenv_tool.py'
