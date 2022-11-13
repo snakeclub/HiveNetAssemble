@@ -21,6 +21,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.
 from HiveNetWebUtils.server import TcpIpServer
 from HiveNetWebUtils.utils.socket import SocketTool
 
+# 开启异步事件嵌套执行支持
+AsyncTools.nest_asyncio_apply()
+
 
 #############################
 # 生命周期函数

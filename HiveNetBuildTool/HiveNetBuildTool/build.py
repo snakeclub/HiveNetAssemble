@@ -16,6 +16,7 @@ import os
 import copy
 from HiveNetCore.utils.run_tool import RunTool
 from HiveNetCore.utils.file_tool import FileTool
+from HiveNetCore.utils.value_tool import ValueTool
 from HiveNetCore.yaml import SimpleYaml, EnumYamlObjType
 from HiveNetPipeline import Pipeline
 
@@ -24,6 +25,48 @@ class BuildPipeline(object):
     """
     构建管道对象
     """
+    #############################
+    # 工具函数
+    #############################
+    @classmethod
+    def load_processer_extend_para(cls, config_file: str):
+        """
+        装载处理插件扩展参数
+
+        @param {str} config_file - 扩展参数配置
+        """
+        # 获取通用扩展配置字典
+        _build_processer_extend_para = RunTool.get_global_var('BUILD_PROCESSER_EXTEND_PARA')
+        if _build_processer_extend_para is None:
+            _build_processer_extend_para = {}
+            RunTool.set_global_var('BUILD_PROCESSER_EXTEND_PARA', _build_processer_extend_para)
+
+        _config = SimpleYaml(config_file, obj_type=EnumYamlObjType.File, encoding='utf-8').yaml_dict
+        for _process_name, _para in _config.items():
+            if _para is None:
+                continue
+
+            # 合并参数
+            _old_para = _build_processer_extend_para.get(_process_name, {})
+            _new_para = ValueTool.merge_dict(_old_para, _para)
+            _build_processer_extend_para[_process_name] = _new_para
+
+    @classmethod
+    def get_processer_extend_para(cls, processer_name: str, default=None):
+        """
+        获取指定处理插件的扩展参数
+
+        @param {str} processer_name - 插件名
+        @param {Any} default=None - 如果找不到的默认值
+
+        @returns {Any} - 返回插件扩展参数配置, 如果没有参数返回None
+        """
+        _build_processer_extend_para = RunTool.get_global_var('BUILD_PROCESSER_EXTEND_PARA', default={})
+        return _build_processer_extend_para.get(processer_name, default)
+
+    #############################
+    # 构造函数
+    #############################
 
     def __init__(self, base_path: str, config_file: str = None, build_file: str = None, cmd_opts: dict = {}):
         """
@@ -89,6 +132,9 @@ class BuildPipeline(object):
 
         self._type_config = self._config[self._type]
 
+        # 装载集成的管道插件
+        Pipeline.load_plugins_embed()
+
         # 装载管道通用插件
         Pipeline.load_plugins_by_path(os.path.join(os.path.dirname(__file__), 'plugins'))
 
@@ -97,6 +143,19 @@ class BuildPipeline(object):
             Pipeline.load_plugins_by_path(
                 os.path.join(self._base_path, self._type_config['plugins'])
             )
+
+        # 装载管道插件的私有扩展参数
+        _base_extend_para_file = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), 'extend_para.yaml'
+        ))
+        if os.path.exists(_base_extend_para_file):
+            self.load_processer_extend_para(_base_extend_para_file)
+
+        _extend_para_file = os.path.abspath(os.path.join(
+            self._base_path, 'extend_para.yaml'
+        ))
+        if os.path.exists(_extend_para_file):
+            self.load_processer_extend_para(_extend_para_file)
 
         # 获取管道运行参数
         self._pipeline_config = SimpleYaml(
@@ -156,16 +215,16 @@ class BuildPipeline(object):
         """
         节点运行通知函数
         """
-        print('[%s] Begin run build step[%s: %s]' % (
-            name, node_id, node_name
+        print('[%s] Begin run build step[%s: %s-%s]' % (
+            name, node_id, node_name, pipeline_obj.pipeline[node_id].get('tips', '')
         ))
 
     def _end_running_notify_fun(self, name, run_id, node_id, node_name, status, status_msg, pipeline_obj):
         """
         结束节点运行通知
         """
-        print('[%s] End run build step[%s: %s] [status: %s]: %s' % (
-            name, node_id, node_name,
+        print('[%s] End run build step[%s: %s-%s] [status: %s]: %s' % (
+            name, node_id, node_name, pipeline_obj.pipeline[node_id].get('tips', ''),
             'S-Success' if status == 'S' else '%s-Failed' % status,
             status_msg
         ))

@@ -16,6 +16,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.
 from HiveNetSimpleSanic.server import SanicServer, SanicTool, EnumServerRunStatus
 from HiveNetSimpleSanic.auth import IPAuthSanic, AppKeyAuthSanic
 
+# 开启异步事件嵌套执行支持
+AsyncTools.nest_asyncio_apply()
+
 
 class TestApi(object):
     """

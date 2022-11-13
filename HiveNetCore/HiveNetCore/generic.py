@@ -20,7 +20,7 @@ import json
 import re
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
-from HiveNetCore.utils.run_tool import RunTool
+from HiveNetCore.utils.global_var_tool import GlobalVarTool
 from HiveNetCore.i18n import get_global_i18n
 
 
@@ -29,6 +29,12 @@ __DESCRIPT__ = '通用基础模块'  # 模块描述
 __VERSION__ = '0.1.0'  # 版本
 __AUTHOR__ = '黎慧剑'  # 作者
 __PUBLISH__ = '2018.08.29'  # 发布日期
+
+
+# 全局变量
+# 用于存储全局变量的值
+# key为全局变量名( string) , value为全局变量的值
+RUNTOOL_GLOBAL_VAR_LIST = dict()
 
 
 def null_fun(*args, **kwargs):
@@ -272,14 +278,14 @@ class CResult(NullObj):
         获取全局的错误码映射表
 
         """
-        _map_error_code = RunTool.get_global_var('HIVENET_ERROR_CODE_MAP')
+        _map_error_code = GlobalVarTool.get_global_var('HIVENET_ERROR_CODE_MAP')
         if _map_error_code is None:
             _map_file = os.path.realpath(os.path.abspath(os.path.dirname(__file__) + '/') +
                                          '/hivenet_error_code/map_error_code.json')
             _map_error_code = {}
             with open(_map_file, 'rt', encoding='utf-8') as f:
                 _map_error_code = json.load(f)
-            RunTool.set_global_var('HIVENET_ERROR_CODE_MAP', _map_error_code)
+            GlobalVarTool.set_global_var('HIVENET_ERROR_CODE_MAP', _map_error_code)
         return _map_error_code
 
     def __str__(self):

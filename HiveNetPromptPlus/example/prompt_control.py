@@ -177,10 +177,13 @@ if __name__ == '__main__':
     print(tips)
     # 循环使用prompt_once一个获取命令和执行
     while True:
-        prompt1_result = prompt1.prompt_once(default='help')
-        print('prompt1_result: %s', prompt1_result.msg)
-        if prompt1_result.code == '10101':
-            break
+        try:
+            prompt1_result = prompt1.prompt_once(default='help')
+            print('prompt1_result: %s', prompt1_result.msg)
+            if prompt1_result.code == '10101':
+                break
+        except:
+            print('excepiton')
     # 结束提示循环
     print('prompt1 stop！')
 
@@ -188,16 +191,5 @@ if __name__ == '__main__':
     # 自动命令循环模式-同步
     #############################
     prompt1.start_prompt_service(
-        tips=tips + '\n当前模式为同步模式',
-        is_async=False,
-        is_print_async_execute_info=True
-    )
-
-    #############################
-    # 自动命令循环模式-异步
-    #############################
-    prompt1.start_prompt_service(
-        tips=tips + '\n当前模式为异步模式',
-        is_async=True,
-        is_print_async_execute_info=True
+        tips=tips + '\n当前模式为同步模式'
     )

@@ -35,7 +35,7 @@ class TestExcepitonTool(unittest.TestCase):
         """
         pass
 
-    def test_methon(self):
+    def test_method(self):
         """
         测试静态方法
         """

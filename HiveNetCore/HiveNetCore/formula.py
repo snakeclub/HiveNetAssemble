@@ -570,22 +570,30 @@ class FormulaTool(object):
                         match_result=match_result,
                         current_index=_current_index
                     )
-                    while _current_index < _maxlen:
-                        _match_info = match_result[_current_index]
+                    _current_info = {
+                        'current_index': _current_index,
+                        'ignore_back_index_limit': -1
+                    }
+                    while _current_info['current_index'] < _maxlen:
+                        _match_info = match_result[_current_info['current_index']]
                         _endkey = FormulaTool.__is_match_keyword(
                             match_info=_match_info, keywords=keywords, key=_key)
                         # DebugTools.debug_print(endkey=_endkey)
                         if _endkey is None:
                             # 没有匹配到结束字符, 继续找下一个
-                            _current_index = _current_index + 1
+                            _current_info['current_index'] = _current_info['current_index'] + 1
                             continue
+
                         # 找到结束标签, 判断是否包含在忽略字符里面
                         if FormulaTool.__check_string_tag_ignore(
-                                match_result=match_result, tag_index=_current_index,
-                                string_ignore_chars=keywords[_key][2].string_ignore_chars):
+                            match_result=match_result, tag_index=_current_info['current_index'],
+                            string_ignore_chars=keywords[_key][2].string_ignore_chars,
+                            content_start_pos=_formula.content_start_pos,
+                            current_info=_current_info
+                        ):
                             # 在忽略列表中, 继续找下一个
-                            _current_index = _current_index + 1
                             continue
+
                         # 匹配上, 退出子循环
                         _is_match_endkey = True
                         _formula.end_pos = _match_info[3]
@@ -594,12 +602,14 @@ class FormulaTool(object):
                         _formula.content_string = formula_str[_formula.content_start_pos: _formula.content_end_pos]
 
                         _loop_result[0].append(_formula)
+
                         # 继续找下一个, 由于匹配上, 要解决重叠问题
                         _current_index = FormulaTool.__move_next_result_index(
                             match_result=match_result,
-                            current_index=_current_index
+                            current_index=_current_info['current_index']
                         )
                         break
+
                     # 退出到这里, 要不已找到字符串结束, 要不已到公式结尾, 直接继续主循环即可
                     if _is_match_endkey:
                         continue
@@ -773,7 +783,8 @@ class FormulaTool(object):
         return _maxlen
 
     @staticmethod
-    def __check_string_tag_ignore(match_result, tag_index, string_ignore_chars):
+    def __check_string_tag_ignore(match_result, tag_index, string_ignore_chars, content_start_pos,
+            current_info: dict = {}):
         """
         检查匹配到的字符串结束标签在忽略字符中
         向前、向后找与标签有重叠冲突的匹配结果, 看是否在忽略字符中
@@ -781,6 +792,8 @@ class FormulaTool(object):
         @param {[type]} match_result - <description>
         @param {[type]} tag_index - <description>
         @param {[type]} string_ignore_chars - <description>
+        @param {int} content_start_pos - 内容的开始位置
+        @param {dict} current_info - 当前的开始位置
 
         @returns {bool} - True-在忽略字符中, False-不在忽略字符中
 
@@ -799,17 +812,25 @@ class FormulaTool(object):
         _maxlen = len(match_result)
 
         # 先向前检索
+        _ignore_back_index_end_pos = -1
+        if current_info['ignore_back_index_limit'] >= 0:
+            _ignore_back_index_end_pos = match_result[current_info['ignore_back_index_limit']][3]
+
         _current_index = tag_index - 1
-        while _current_index >= 0:
+        while _current_index >= 0 and _current_index > current_info['ignore_back_index_limit']:
             _cmp_info = match_result[_current_index]
-            if _cmp_info[2] <= _match_info[2] - _max_char_len:
+            if _cmp_info[2] <= _match_info[2] - _max_char_len or _cmp_info[2] < content_start_pos or _cmp_info[2] < _ignore_back_index_end_pos:
                 # 超出相交范围, 不再继续
                 break
+
             if _cmp_info[2] <= _match_info[2] < _cmp_info[3]:
                 # 有冲突, 判断是否忽略列表中
                 if _cmp_info[0] in string_ignore_chars:
-                    # 在忽略列表中
+                    # 在忽略列表中, 要继续找下一个
+                    current_info['current_index'] += 1
+                    current_info['ignore_back_index_limit'] = tag_index
                     return True
+
             # 继续向前
             _current_index = _current_index - 1
             continue
@@ -825,6 +846,16 @@ class FormulaTool(object):
                 # 有冲突, 判断是否忽略列表中
                 if _cmp_info[0] in string_ignore_chars:
                     # 在忽略列表中
+                    current_info['current_index'] = _current_index + 1
+                    current_info['ignore_back_index_limit'] = _current_index
+                    # 将完全包含在忽略节点中的后面节点跳过
+                    _last_pos = match_result[_current_index][3]
+                    while current_info['current_index'] < _maxlen:
+                        if match_result[current_info['current_index']][3] <= _last_pos:
+                            current_info['current_index'] += 1
+                            current_info['ignore_back_index_limit'] += 1
+                        else:
+                            break
                     return True
             # 继续向后
             _current_index = _current_index + 1

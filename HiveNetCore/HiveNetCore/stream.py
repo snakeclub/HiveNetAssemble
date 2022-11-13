@@ -19,12 +19,15 @@ import os
 import sys
 import traceback
 import threading
+try:
+    from gevent import sleep
+except ImportError:
+    from time import sleep
 from enum import Enum
 from abc import ABC, abstractmethod  # 利用abc模块实现抽象类
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 from HiveNetCore.generic import NullObj
-from HiveNetCore.utils.run_tool import RunTool
 
 
 __MOUDLE__ = 'stream'  # 模块名
@@ -192,7 +195,7 @@ class BaseStream(ABC):
                         return
                     if self._stream_list_tag[stream_tag][1]:
                         # 当前流的暂停标记
-                        RunTool.sleep(0.01)
+                        sleep(0.01)
                         continue
 
                     # 循环进行流处理
@@ -230,11 +233,11 @@ class BaseStream(ABC):
                                 return
 
                     # 准备执行下一个
-                    RunTool.sleep(0.01)
+                    sleep(0.01)
                 except StopIteration:
                     if self._keep_wait_data:
                         # 没有获取到数据,但继续循环尝试获取
-                        RunTool.sleep(0.01)
+                        sleep(0.01)
                         continue
                     else:
                         # 已经到结尾了,结束流处理
@@ -294,22 +297,22 @@ class BaseStream(ABC):
             _closed_status = EnumStreamClosedStatus.RunOver
             _pos = cls._current_position(stream_obj)
             # 组织动态函数,目的是传入对应的参数
-            _exec_fun_str = 'dealer_fun(_get_obj, _pos'
-            for _key in kwargs_dealer_fun.keys():
-                _exec_fun_str = '%s, %s=%s' % (
-                    _exec_fun_str,
-                    _key,
-                    'kwargs_dealer_fun[\'' + _key + '\']'
-                )
-            _exec_fun_str = _exec_fun_str + ')'
+            # _exec_fun_str = 'dealer_fun(_get_obj, _pos'
+            # for _key in kwargs_dealer_fun.keys():
+            #     _exec_fun_str = '%s, %s=%s' % (
+            #         _exec_fun_str,
+            #         _key,
+            #         'kwargs_dealer_fun[\'' + _key + '\']'
+            #     )
+            # _exec_fun_str = _exec_fun_str + ')'
             while True:
                 try:
                     # 循环进行流处理
                     _pos = cls._current_position(stream_obj)
                     _get_obj = cls._next(stream_obj=stream_obj)
                     try:
-                        # dealer_fun(_get_obj, _pos, kwargs_dealer_fun)
-                        exec(_exec_fun_str)
+                        dealer_fun(_get_obj, _pos, **kwargs_dealer_fun)
+                        # exec(_exec_fun_str)
                     except Exception:
                         # 先输出日志
                         _error_obj = sys.exc_info()
@@ -338,7 +341,7 @@ class BaseStream(ABC):
                             return
 
                     # 准备执行下一个
-                    RunTool.sleep(0.01)
+                    sleep(0.01)
                 except StopIteration:
                     # 已经到结尾了,结束流处理
                     return
@@ -573,7 +576,7 @@ class BaseStream(ABC):
             while True:
                 if stream_tag not in self._stream_list.keys():
                     break
-                RunTool.sleep(0.01)
+                sleep(0.01)
 
     def pause_stream(self, stream_tag='default'):
         """
@@ -628,7 +631,7 @@ class BaseStream(ABC):
             while True:
                 if len(self._stream_list_tag.keys()) == 0:
                     break
-                RunTool.sleep(0.01)
+                sleep(0.01)
 
     def seek(self, position, stream_tag='default'):
         """

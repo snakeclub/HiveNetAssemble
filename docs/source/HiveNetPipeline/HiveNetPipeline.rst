@@ -7,7 +7,9 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
-   HiveNetPipeline.extend_router
+   HiveNetPipeline.embed_predealer
+   HiveNetPipeline.embed_processer
+   HiveNetPipeline.embed_router
    HiveNetPipeline.pipeline
 
 Module contents

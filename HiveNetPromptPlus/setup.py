@@ -25,7 +25,7 @@ An enhanced interactive command line extension processing module.""".strip()
 
 DEPENDENCIES = [
     'HiveNetCore>=0.1.2',
-    'prompt-toolkit2'
+    'prompt-toolkit'
 ]
 
 TEST_DEPENDENCIES = []

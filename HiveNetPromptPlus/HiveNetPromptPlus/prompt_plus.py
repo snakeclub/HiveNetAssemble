@@ -13,32 +13,23 @@
 @module prompt_plus
 @file prompt_plus.py
 """
+import os
+import sys
 import threading
 import traceback
 import copy
 import math
-import sys
-import os
 import logging
-from queue import Queue
-from collections.abc import Iterator
-import asyncio
-from prompt_toolkit2.shortcuts.prompt import confirm
-from prompt_toolkit2 import prompt
-from prompt_toolkit2 import PromptSession  # 动态对象要用到, 所以不能删除
-from prompt_toolkit2 import print_formatted_text as prompt_toolkit_print
-try:
-    from prompt_toolkit2.eventloop.defaults import use_asyncio_event_loop
-except:
-    pass
-from prompt_toolkit2.patch_stdout import patch_stdout
-from prompt_toolkit2.history import InMemoryHistory
-from prompt_toolkit2.styles import Style
-from prompt_toolkit2.lexers import Lexer
-from prompt_toolkit2.completion import Completer, Completion
-from prompt_toolkit2.shortcuts import ProgressBar
-from prompt_toolkit2.formatted_text import HTML
-from HiveNetCore.utils.run_tool import RunTool
+from collections import Iterator
+from prompt_toolkit import prompt, print_formatted_text as prompt_toolkit_print, PromptSession
+from prompt_toolkit.shortcuts.prompt import confirm
+from prompt_toolkit.shortcuts import ProgressBar
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.styles import Style
+from prompt_toolkit.lexers import Lexer
+from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.formatted_text import HTML
+from HiveNetCore.utils.run_tool import RunTool, AsyncTools
 from HiveNetCore.generic import CResult
 from HiveNetCore.stream import StringStream
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
@@ -1556,6 +1547,7 @@ class PromptPlus(object):
     #############################
     # 实例化的命令行处理 - 内部变量
     #############################
+    _is_init_prompt_instance = True  # 是否初始化PromptSession, 继承类可以不初始化
     _prompt_instance = None  # 命令输入处理对象(prompt_toolkit.shortcuts.Prompt类)
     _message = 'CMD>'  # 命令行提示符内容
     # 默认输入参数值, 定义了一些必须有默认取值的参数, 用于创建_prompt_init_para并合并实际的调用参数
@@ -1602,6 +1594,7 @@ class PromptPlus(object):
             _color_set = self._default_color_set.copy()
             if self._prompt_init_para['color_set'] is not None:
                 _color_set.update(self._prompt_init_para['color_set'])
+            self._prompt_init_para['color_set'] = _color_set
             # 生成style
             _style = Style.from_dict(_color_set)
             self._prompt_init_para['style'] = _style
@@ -1623,16 +1616,19 @@ class PromptPlus(object):
         # 实例化输入类
         if self._prompt_instance is not None:
             del self._prompt_instance  # 先清除原来的对象
-        # prompt-toolkit似乎取消了default参数的支持, default=self._default'
-        _init_str = ('self._prompt_instance = PromptSession('
-                     'message=self._get_color_message(self._message)')
-        for _para_name in self._prompt_init_para.keys():
+
+        # 默认参数
+        self._prmopt_default_kwargs = {}
+        for _para_name, _para_value in self._prompt_init_para.items():
             if _para_name in self._prompt_para_name_list:
-                _init_str = '%s, %s=self._prompt_init_para[\'%s\']' % (
-                    _init_str, _para_name, _para_name)
-        _init_str = '%s)' % _init_str
-        # 动态执行初始化处理
-        exec(_init_str)
+                self._prmopt_default_kwargs[_para_name] = _para_value
+
+        # prompt-toolkit似乎取消了default参数的支持, default=self._default'
+        if self._is_init_prompt_instance:
+            self._prompt_instance = PromptSession(
+                message=self._get_color_message(self._message), **self._prmopt_default_kwargs
+            )
+        # self._prompt_instance = PromptSession(message=self._message, **self._prmopt_default_kwargs)
 
     def _get_color_message(self, message):
         """
@@ -1830,84 +1826,6 @@ class PromptPlus(object):
             self.prompt_print(_print_str)
             return CResult(code='29999')
 
-    def _async_call_on_cmd(self, message='', cmd_str='', is_print_async_execute_info=True):
-        """
-        异步模式执行匹配命令, 直接调用_call_on_cmd, 只是标识为异步模式处理
-
-        @param {string} message='' - 输入提示信息
-        @param {string} cmd_str='' - 匹配到的命令
-        @param {bool} is_print_async_execute_info=True - 异步执行时是否打印执行信息
-
-        """
-        if is_print_async_execute_info:
-            _print_str = 'begin execute (message[%s]): cmd[%s]' % (message, cmd_str)
-            self.prompt_print(_print_str)
-
-        _run_result = self._call_on_cmd(message=message, cmd_str=cmd_str)
-        self._deal_run_result(_run_result)
-
-        if is_print_async_execute_info:
-            _print_str = 'done execute (message[%s]): cmd[%s]' % (message, cmd_str)
-            self.prompt_print(_print_str)
-
-    async def _async_cmd_service(self):
-        """
-        异步模式的命令行循环获取命令线程服务, 标识为异步模式
-        获取到一个命令后, 将命令放入队列, 然后马上处理下一个命令的接收
-
-        """
-        while True:
-            _run_result = CResult(code='00000')
-            _cmd_str = ''
-            _message = self._message
-            try:
-                _cmd_str = await self._prompt_instance.prompt(message=_message, default=self._default, async_=True)
-            except KeyboardInterrupt:
-                # 用户取消输入
-                # 执行on_abort函数
-                _run_result = self._call_on_abort(message=_message)
-            except EOFError:
-                # 用户退出处理
-                # 执行on_exit函数
-                _run_result = self._call_on_exit(message=_message)
-
-            _real_result = self._deal_run_result(_run_result)
-
-            if _real_result.code == '10101':
-                # 退出获取命令处理
-                return
-
-            if len(_cmd_str) > 0:
-                # 处理执行函数
-                self._async_cmd_queue.put((_message, _cmd_str))
-
-            # 间隔一会, 继续下一个处理
-            await asyncio.sleep(0.1)
-
-    async def _async_deal_cmd_from_queue(self, is_print_async_execute_info=True):
-        """
-        异步模式从队列中获取命令行并启动后台线程执行处理,  标识为异步模式
-
-        @param {bool} is_print_async_execute_info - 异步执行时是否打印执行信息
-
-        """
-        while True:
-            _cmd = tuple()
-            try:
-                _cmd = self._async_cmd_queue.get(block=False)
-            except Exception:
-                await asyncio.sleep(1)
-                continue
-            if len(_cmd) > 0:
-                # 开始处理命令, 用多线程方式
-                _job_thread = threading.Thread(
-                    target=self._async_call_on_cmd, args=(
-                        _cmd[0], _cmd[1], is_print_async_execute_info)
-                )
-                # 启动线程
-                _job_thread.start()
-            await asyncio.sleep(1)
-
     #############################
     # 实例化的命令行处理 - 公共函数
     #############################
@@ -1983,8 +1901,6 @@ class PromptPlus(object):
             'long_para': None,
             'word_para': None,
         }
-        self._loop = asyncio.get_event_loop()  # 异步模式需要的事件循环处理对象
-        self._async_cmd_queue = Queue()  # 异步模式的命令执行队列
         # 关键字配色方案, 每个配色方案格式为'#000088 bg:#aaaaff underline'
         self._default_color_set = {
             # 用户输入
@@ -2097,15 +2013,15 @@ class PromptPlus(object):
 
         try:
             _cmd_str = ''
-            # 不确定参数数量, 因此用循环方式赋值
-            _run_str = u'self._prompt_instance.prompt(message=_message, default=default'
-            for _para_name in kwargs:
+            _prompt_kwargs = {}
+            for _para_name, _para_value in kwargs.items():
                 if _para_name in self._prompt_para_name_list:
-                    _run_str = u'%s, %s=kwargs[\'%s\']' % (_run_str, _para_name, _para_name)
-            _run_str = u'%s)' % _run_str
+                    _prompt_kwargs[_para_name] = _para_value
 
             # 执行获取输入
-            _cmd_str = eval(_run_str)
+            _cmd_str = AsyncTools.sync_run_coroutine(
+                self._prompt_instance.prompt(message=_message, default=default, **_prompt_kwargs)
+            )
 
             # 处理输入
             if len(_cmd_str) > 0:
@@ -2131,54 +2047,26 @@ class PromptPlus(object):
 
         return _real_result
 
-    # FIXME(黎慧剑): 异步模式, 当任务进程有输出时命令行不能固定在最后一行
     def start_prompt_service(
             self,
-            tips=u'命令处理服务(输入过程中可通过Ctrl+C取消输入, 通过Ctrl+D退出命令行处理服务)',
-            is_async=False,
-            is_print_async_execute_info=True
+            tips=u'命令处理服务(输入过程中可通过Ctrl+C取消输入, 通过Ctrl+D退出命令行处理服务)'
     ):
         """
         启动命令行服务(循环获取用户输入并执行相应命令)
 
         @param {string} tips=u'命令处理服务(输入过程中可通过Ctrl+C取消输入, 通过Ctrl+D退出命令行处理服务)'
              - 命令行启动后的提示信息
-        @param {bool} is_async=False - 是否异步模式, 即在命令执行完成前就可以接收下一个命令输入,
-            否则等待命令结束后才接收下一个命令输入
-        @param {bool} is_print_async_execute_info=True - 异步模式下是否打印执行信息(开始、结束)
-
         """
         # 先打印提示信息
         self.prompt_print(tips)
-        if not is_async:
-            # 非异步模式, 按部就班完成处理
-            while True:
-                _result = self.prompt_once(default=self._default)
-                if _result.code == '10101':
-                    # 退出获取命令处理
-                    return
+        while True:
+            _result = self.prompt_once(default=self._default)
+            if _result.code == '10101':
+                # 退出获取命令处理
+                return
 
-                # 间隔一会, 继续下一个处理
-                RunTool.sleep(0.1)
-        else:
-            # 异步模式, 通知prompt_toolkit使用asyncio event loop
-            try:
-                use_asyncio_event_loop()
-            except:
-                # 兼容3.0的处理
-                pass
-            with patch_stdout():  # 支持重定向屏幕输出, 保证命令行一直在最下面
-                shell_task = asyncio.ensure_future(self._async_cmd_service())
-                background_task = asyncio.gather(
-                    self._async_deal_cmd_from_queue(
-                        is_print_async_execute_info=is_print_async_execute_info
-                    ),
-                    return_exceptions=True
-                )
-
-                self._loop.run_until_complete(shell_task)
-                background_task.cancel()
-                self._loop.run_until_complete(background_task)
+            # 间隔一会, 继续下一个处理
+            RunTool.sleep(0.1)
 
     #############################
     # 工具函数

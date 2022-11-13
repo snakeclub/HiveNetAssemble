@@ -1,6 +1,14 @@
 HiveNetPromptPlus package
 =========================
 
+Subpackages
+-----------
+
+.. toctree::
+   :maxdepth: 4
+
+   HiveNetPromptPlus.layout
+
 Submodules
 ----------
 
@@ -8,6 +16,7 @@ Submodules
    :maxdepth: 4
 
    HiveNetPromptPlus.prompt_plus
+   HiveNetPromptPlus.prompt_plus_console
 
 Module contents
 ---------------

@@ -243,6 +243,116 @@ class TestFormulaTool(unittest.TestCase):
         self.assertTrue(_formula.formula_value ==
                         '[开始] 31 [PY1开始][自定义内容开始][ab开始]testab[时间开始][时间结束][ab结束][自定义内容结束]} [PY1结束] [string 开始]{$PY=string py$} [string 结束] [结束]', '公式计算失败')
 
+    def test_string(self):
+        """
+        测试字符串匹配
+        """
+        # 解析带公式的字符串
+        _source_str = 'aaaa(\'[first begin]"[first end]\')abcd"[double begin]efgh\\",""ha\'ha[double end]"dcba, efgh\'[single begin]hijk\\\', \'\'ha"ha[single end]\'hgfe""[ef]\'\'[gh]"\\""[ij]""""[kl]\'\\\'\'[mn]\'\'\'\''
+
+        # 定义字符串公式的公共关键字参数，例如python中的""引起来的认为是字符串
+        _double_para = StructFormulaKeywordPara()
+        _double_para.is_string = True  # 声明是字符串参数
+        _double_para.has_sub_formula = False  # 声明公式中不会有子公式
+        # 在查找字符串结束关键字时忽略的转义情况，例如"this is a string ,ignore \" , this is real end"
+        _double_para.string_ignore_chars = ['\\"', '""']
+
+        # 定义字符串公式的公共关键字参数，例如python中的""引起来的认为是字符串
+        _single_para = StructFormulaKeywordPara()
+        _single_para.is_string = True  # 声明是字符串参数
+        _single_para.has_sub_formula = False  # 声明公式中不会有子公式
+        # 在查找字符串结束关键字时忽略的转义情况，例如"this is a string ,ignore \" , this is real end"
+        _single_para.string_ignore_chars = ["\\'", "''"]
+
+        # 定义公式解析的关键字参数
+        _keywords = {
+            # 第一个定义了字符串的公式匹配参数
+            'DoubleString': [
+                ['"', list(), list()],  # 公式开始标签
+                ['"', list(), list()],  # 公式结束标签
+                _double_para  # 公式检索参数
+            ],
+            'SingleString': [
+                ["'", list(), list()],  # 公式开始标签
+                ["'", list(), list()],  # 公式结束标签
+                _single_para  # 公式检索参数
+            ],
+        }
+
+        # 静态解析公式
+        _formula = FormulaTool.analyse_formula(
+            formula_str=_source_str, keywords=_keywords, ignore_case=False)
+
+        temp_formula = _formula.sub_formula_list[0]
+        if temp_formula.keyword != 'SingleString' or temp_formula.content_string != '[first begin]"[first end]':
+            # 整个字符串
+            self.assertTrue(False, '静态解析First匹配不通过')
+
+        temp_formula = _formula.sub_formula_list[1]
+        if temp_formula.keyword != 'DoubleString' or temp_formula.content_string != '[double begin]efgh\\",""ha\'ha[double end]':
+            # 整个字符串
+            self.assertTrue(False, '静态解析DoubleString匹配不通过')
+
+        temp_formula = _formula.sub_formula_list[2]
+        if temp_formula.keyword != 'SingleString' or temp_formula.content_string != '[single begin]hijk\\\', \'\'ha"ha[single end]':
+            # 整个字符串
+            self.assertTrue(False, '静态解析SingleString匹配不通过')
+
+        temp_formula = _formula.sub_formula_list[3]
+        if temp_formula.keyword != 'DoubleString' or temp_formula.content_string != '':
+            # 整个字符串
+            self.assertTrue(False, '静态解析DoubleString null 匹配不通过')
+
+        temp_formula = _formula.sub_formula_list[4]
+        if temp_formula.keyword != 'SingleString' or temp_formula.content_string != '':
+            # 整个字符串
+            self.assertTrue(False, '静态解析SingleString null 匹配不通过')
+
+        _cmp_list = [
+            _formula.sub_formula_list[5].content_string,
+            _formula.sub_formula_list[6].content_string,
+            _formula.sub_formula_list[7].content_string,
+            _formula.sub_formula_list[8].content_string
+        ]
+        self.assertTrue(
+            TestTool.cmp_list(
+                _cmp_list, ['\\"', '""', "\\'", "''"]
+            ), '静态解析 忽略字符模式不通过'
+        )
+
+        # 动态执行公式
+        # 定义公式对象处理函数
+        _deal_fun_list = {
+            'DoubleString': FormulaTool.default_deal_fun_string_content,  # 只保留标签内容
+            'SingleString': FormulaTool.default_deal_fun_string_content,  # 只保留标签内容
+        }
+
+        # 初始化公式类
+        _formula_obj = FormulaTool(
+            keywords=_keywords,
+            ignore_case=False,
+            deal_fun_list=_deal_fun_list,
+            default_deal_fun=None
+        )
+
+        # 计算公式
+        _formula1 = _formula_obj.run_formula_as_string(_source_str)
+
+        temp_formula = _formula1.sub_formula_list[0]
+        if temp_formula.keyword != 'SingleString' or temp_formula.content_string != '[first begin]"[first end]':
+            # 整个字符串
+            self.assertTrue(False, '动态解析First匹配不通过')
+
+        temp_formula = _formula1.sub_formula_list[1]
+        if temp_formula.keyword != 'DoubleString' or temp_formula.content_string != '[double begin]efgh\\",""ha\'ha[double end]':
+            # 整个字符串
+            self.assertTrue(False, '动态解析DoubleString匹配不通过')
+
+        temp_formula = _formula1.sub_formula_list[2]
+        if temp_formula.keyword != 'SingleString' or temp_formula.content_string != '[single begin]hijk\\\', \'\'ha"ha[single end]':
+            # 整个字符串
+            self.assertTrue(False, '动态解析SingleString匹配不通过')
+
 
 if __name__ == '__main__':
     # 当程序自己独立运行时执行的操作

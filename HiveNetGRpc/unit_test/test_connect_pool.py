@@ -22,6 +22,9 @@ from HiveNetGRpc.server import GRpcServer, AIOGRpcServer
 from HiveNetGRpc.client import AIOGRpcClient, GRpcClient, GRpcPoolConnection
 from HiveNetGRpc.msg_formater import RemoteCallFormater
 
+# 开启异步事件嵌套执行支持
+AsyncTools.nest_asyncio_apply()
+
 
 @RemoteCallFormater.format_service(with_request=False)
 async def service_simple_call_para(a, b, *args, c=10, d={'d1': 'd1value'}, **kwargs):

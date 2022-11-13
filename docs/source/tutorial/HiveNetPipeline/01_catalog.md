@@ -2,8 +2,6 @@
 
 HiveNetPipeline模块提供一个易于使用的管道执行框架，支持快速实现可配置的数据流处理，例如数据对象的按步处理、工作流等场景。
 
-
-
 ## HiveNetPipeline的主要概念
 
 - pipeline ：管道控制器，定义管道的执行流程、同步/异步执行方式、执行通知函数等，管道控制器控制管道的每次执行
@@ -12,6 +10,7 @@ HiveNetPipeline模块提供一个易于使用的管道执行框架，支持快�
 - input_data ：输入数据对象，每个管道任务需要指定管道需要处理的输入数据；输入数据建议采用可支持 json 转换的基础变量类型，以支持可在执行过程中将暂停的管道任务保存到 json 格式的检查点中
 - output : 输出数据，每个管道执行完成后将输出处理后的数据对象
 - node : 管道执行节点，定义了当前节点的处理器参数，以及获取下一个处理节点的路由器参数配置，多个执行节点形成的管道配置（pipeline_config）可用于控制管道的执行流程
+- predealer ：管道预处理器, 每个管道预处理器必须集成预处理器框架 (PipelinePredealer), 预处理器在管道节点运行开始时执行, 可以放入自定义的预处理逻辑; 预处理可以返回True/False控制当前节点继续执行还是跳过, 如果返回True则正常继续执行当前节点, 如果返回False则跳过当前节点的执行(不执行processer和router), 直接跳到下一个相临节点执行(注意, 当前节点的router并不会执行, 所以只会跳到下一个相临节点运行)
 - processer ：管道处理器，每个管道处理器必须继承处理器框架（PipelineProcesser），按标准模式对输入数据对象进行处理，并输出结果数据；结果数据可以供下一个管道处理器进行处理，如果是最后一个管道处理器，则结果数据为最后管道任务执行的输出结果
 - router : 管道路由器，每个管道路由器必须继承路由器框架（PipelineRouter），管道路由器用于指定管道的下一个处理节点，以支持形成非串型执行的处理工作流
 - context : 上下文信息，用于在整个管道任务执行过程中传递共享的信息，可以在开始执行管道任务或执行节点中对上下文信息进行修改
@@ -23,17 +22,15 @@ HiveNetPipeline模块提供一个易于使用的管道执行框架，支持快�
   - processor_name {str} 处理器名
   - start_time {str} 开始时间，格式为'%Y-%m-%d %H:%M:%S.%f'
   - end_time {str} 结束时间，格式为'%Y-%m-%d %H:%M:%S.%f'
-  - status {str} 执行状态，'S' - 成功，'E' - 出现异常
+  - status {str} 执行状态，'S' - 成功，'E' - 出现异常, 'K' - 跳过节点
   - status_msg {str} 状态描述，当异常时送入异常信息
   - router_name : 路由名(直线路由可以不设置路由器)
   - is_sub_pipeline {bool} 是否子管道执行
   - sub_trace_list {list} 子管道执行的trace_list，记录子管道执行记录
 
-
-
 ## HiveNetPipeline的使用
 
-**1、开发所需的管道处理器（processer）和管道路由器（router ）**
+**1、开发所需的管道处理器（processer）和管道路由器（router）、管道预处理器 (predealer)**
 
 （1）管道处理器开发要点
 
@@ -56,13 +53,21 @@ HiveNetPipeline模块提供一个易于使用的管道执行框架，支持快�
 - 实现 get_next 函数实现路由的下一个处理节点判断处理， 如果当前节点是最后一个节点则返回 None（注意： get_next 的 kwargs 参数将传入管道配置 pipeline_config 的 router_para 参数）
 - 可以通过 HiveNetPipeline.Tools 的 get_node_id_by_name 函数，通过处理节点名获取对应的id
 
-**2、加载管道处理器和路由器插件**
+（3）管道预处理器开发要点
 
-在创建管道前通过以下函数加载所需的管道处理器和路由器插件：
+- 每个预处理器需继承 HiveNetPipeline.PipelinePredealer 类，通过实现 predealer_name 函数指定管道预处理器的唯一标识名
+- 如果预处理器使用前需要进行初始化操作，可通过实现 initialize 函数进行初始化，该函数将在加载管道插件时执行且只执行一次
+- 实现 pre_deal 函数放入自定义的处理逻辑, 该函数的返回值可以控制当前节点是否继续执行: 如果返回True则正常继续执行当前节点, 如果返回False则跳过当前节点的执行(不执行processer和router), 直接跳到下一个相临节点执行(注意, 当前节点的router并不会执行, 所以只会跳到下一个相临节点运行)
 
-- HiveNetPipeline.Pipeline.add_plugin :  直接装载管道处理器或路由器的类对象
-- HiveNetPipeline.Pipeline.load_plugins_by_file : 通过装载python文件的方式装载文件中的处理器及路由器类对象
-- HiveNetPipeline.Pipeline.load_plugins_by_path : 通过指定目录装载目录下python文件的方式装载文件中的处理器及路由器类对象
+
+**2、加载管道处理器和路由器、预处理器插件**
+
+在创建管道前通过以下函数加载所需的管道处理器和路由器、预处理器插件：
+
+- HiveNetPipeline.Pipeline.add_plugin :  直接装载管道处理器或路由器、预处理器的类对象
+- HiveNetPipeline.Pipeline.load_plugins_by_file : 通过装载python文件的方式装载文件中的处理器及路由器、预处理器类对象
+- HiveNetPipeline.Pipeline.load_plugins_by_path : 通过指定目录装载目录下python文件的方式装载文件中的处理器及路由器、预处理器类对象
+- HiveNetPipeline.Pipeline.load_plugins_embed : 加载内嵌管道处理器和路由器、预处理器插件
 
 **3、设置管道配置字典/json**
 
@@ -72,7 +77,10 @@ HiveNetPipeline模块提供一个易于使用的管道执行框架，支持快�
 {
     "1": {
         "name": "节点配置名",
+        "predealer": "预处理器名",
+        "predealer_execute_para": {},
         "processor": "处理器名",
+        "processor_execute_para": {},
         "is_sub_pipeline": False,
         "sub_pipeline_para": {},
         "context": {},
@@ -93,7 +101,10 @@ HiveNetPipeline模块提供一个易于使用的管道执行框架，支持快�
 需要注意的要点如下：
 
 - 字典中的 key 为处理节点id，必须定义为从 “1” 开始的连续数字，且数字不能出现重复和断开的情况
+- 预处理器 (predealer) 为选填, 指定该处理节点所使用的管道预处理器(在执行管道处理器前会先执行, 执行结果可以控制是否跳过当前节点的执行)
+- 预处理器执行参数(predealer_execute_para)为选填, 指定执行预处理器时送入的kwargs扩展参数
 - 处理器名（processor）为必填，指定该处理节点所使用的管道处理器
+- 处理器执行参数(processor_execute_para)为选填, 指定执行处理器时送入的kwargs扩展参数
 - 是否子管道处理器（is_sub_pipeline）为选填，如果指定为True，则执行对应的子管道任务
 - 子管道参数（sub_pipeline_para）为选填，为生成子管道的参数，按具体的子管道处理器定义
 - 节点配置名（name）为选填，可以设置为唯一的名字，便于处理路由通过名字唯一定位到处理节点id
@@ -109,7 +120,7 @@ HiveNetPipeline模块提供一个易于使用的管道执行框架，支持快�
 
 ```
 _pl = HiveNetPipeline.Pipeline(
-	'my pipeline', _pipeline_config, ……
+    'my pipeline', _pipeline_config, ……
 )
 ```
 
@@ -136,8 +147,6 @@ while _pl.status(run_id=_run_id) not in ['success', 'exception']:
 # 获取执行结果
 _output = _pl.output(run_id=_run_id)
 ```
-
-
 
 ## 管道执行控制
 
@@ -192,3 +201,22 @@ _pl.load_checkpoint(_json_str)
 **6、控制任务逐步执行**
 
 在启动任务的时候（start）可以指定任务逐步执行（is_step_by_step 参数设置为True），这样管道将执行一步就将管道置为暂停（同时也会支持子管道的任务按步暂停），便于自行控制管道任务执行节奏。
+
+
+
+## 内嵌的管道处理器和路由器、预处理器插件介绍
+
+### 管道预处理器
+
+- ConditionPredealer : 条件判断预处理器, 该预处理器可通过 predealer_execute_para 配置项送入conditions条件参数, 条件参数执行返回True/False可控制是否跳过当前节点的执行
+
+### 管道处理器
+
+- Null ：空处理器，不做任何处理
+
+
+### 管道路由器
+
+- GoToNode ：指定节点跳转路由器，可根据上下文或路由器参数进行跳转；优先根据上下文参数判断要跳转的节点，该参数可以由对应节点的处理器主动写入，goto_node_id - 要跳转到的节点id，goto_node_name - 要跳转到的节点名；如果上下文找不到跳转参数，则从路由器参数判断要跳转的节点，参数命名与上下文一致
+
+- IfGotoNode ：指定节点按条件跳转路由器, 可根据上下文或路由器参数进行条件跳转；优先根据上下文参数判断要跳转的节点，该参数可以由对应节点的处理器主动写入，如果上下文找不到跳转参数，则从路由器参数判断要跳转的节点，参数命名与上下文一致; 具体支持的参数参考路由器的get_next函数注释

@@ -15,6 +15,9 @@ from HiveNetCore.utils.run_tool import AsyncTools
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 from HiveNetNoSql.mongo import MongoNosqlDriver
 
+# 开启异步事件嵌套执行支持
+AsyncTools.nest_asyncio_apply()
+
 
 class TestMongoNosqlDriver(unittest.TestCase):
     """

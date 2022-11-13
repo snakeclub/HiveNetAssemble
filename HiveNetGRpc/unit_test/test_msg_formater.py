@@ -21,6 +21,8 @@ from HiveNetGRpc.enum import EnumCallMode
 from HiveNetGRpc.server import AIOGRpcServer, GRpcServer
 from HiveNetGRpc.client import AIOGRpcClient, GRpcClient
 from HiveNetGRpc.msg_formater import RemoteCallFormater
+# 开启异步事件嵌套执行支持
+AsyncTools.nest_asyncio_apply()
 
 #############################
 # 控制是否执行测试案例的字典

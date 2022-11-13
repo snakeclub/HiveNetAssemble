@@ -1,0 +1,33 @@
+# ******************************************
+# 构建处理插件扩展参数
+# Item Key: 扩展插件名(processer_name)
+#   ... # 插件的参数
+# ******************************************
+ProcesserBuildGetSysInfos:
+  # ******************************************
+  # 获取系统信息参数配置
+  # Item Key: 信息类型标识
+  #   getKey: 获取参数的key, 如果不设置代表直接使用参数类型标识
+  #   func: 已加载后的处理函数对象, 加载过一次以后可以直接使用, 正常情况下不需要配置
+  #   libConfig:  要加载函数的配置
+  #       path: str, 文件路径或加载模块的指定搜索路径(当前工作目录下的相对路径)
+  #       module_name: str, 指定要加载的模块名, 如果path包含完整文件名可以不设置
+  #       class: str, 插件入口类名
+  #       function: str, 指定要获取的函数名
+  #       instantiation: bool, 是否要初始化类(缓存实例), 默认为False
+  #       init_args {list} - 类实例的初始化固定参数, 以*args方式传入
+  #       init_kwargs {dict} - 类实例的初始化kv参数, 以*kwargs方式传入
+  # ******************************************
+  platform:
+    # 获取操作系统信息
+    libConfig:
+      module_name: HiveNetCore.utils.run_tool
+      class: RunTool
+      function: platform_info
+
+  sysEnviron:
+    # 获取系统环境变量
+    libConfig:
+      module_name: HiveNetCore.utils.run_tool
+      class: RunTool
+      function: get_sys_environ

@@ -7,7 +7,6 @@
 @file test_build.py
 """
 
-import time
 import os
 import sys
 import unittest

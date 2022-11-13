@@ -55,6 +55,46 @@ class Tools(object):
         return None
 
 
+class PipelinePredealer(object):
+    """
+    管道预处理器框架类
+    """
+
+    @classmethod
+    def initialize(cls):
+        """
+        初始化处理类, 仅在装载的时候执行一次初始化动作
+        """
+        pass
+
+    @classmethod
+    def predealer_name(cls) -> str:
+        """
+        预处理器名称, 唯一标识处理器
+
+        @returns {str} - 当前处理器名称
+        """
+        raise NotImplementedError()
+
+    @classmethod
+    def pre_deal(cls, input_data, context: dict, pipeline_obj, run_id: str, **kwargs):
+        """
+        执行预处理
+
+        @param {object} input_data - 处理器输入数据值, 除第一个处理器外, 该信息为上一个处理器的输出值
+        @param {dict} context - 传递上下文, 该字典信息将在整个管道处理过程中一直向下传递, 可以在处理器中改变该上下文信息
+        @param {Pipeline} pipeline_obj - 管道对象, 作用如下:
+            1、更新执行进度
+            2、输出执行日志
+            3、异步执行的情况主动通知继续执行管道处理
+        @param {str} run_id - 当前管道的运行id
+        @param {kwargs} - 传入的预处理扩展参数
+
+        @returns {bool} - 是否继续执行该节点, True - 继续执行该节点, False - 跳过该节点直接执行下一个节点
+        """
+        return True
+
+
 class PipelineProcesser(object):
     """
     管道处理器框架类
@@ -85,7 +125,7 @@ class PipelineProcesser(object):
         return False
 
     @classmethod
-    def execute(cls, input_data, context: dict, pipeline_obj, run_id: str):
+    def execute(cls, input_data, context: dict, pipeline_obj, run_id: str, **kwargs):
         """
         执行处理
         (可以为同步也可以为异步方法)
@@ -97,6 +137,7 @@ class PipelineProcesser(object):
             2、输出执行日志
             3、异步执行的情况主动通知继续执行管道处理
         @param {str} run_id - 当前管道的运行id
+        @param {kwargs} - 传入的运行扩展参数
 
         @returns {object} - 处理结果输出数据值, 供下一个处理器处理, 异步执行的情况返回None
         """
@@ -170,7 +211,7 @@ class SubPipeLineProcesser(object):
         return False
 
     @classmethod
-    def get_sub_pipeline(cls, input_data, context: dict, pipeline_obj, run_id: str, sub_pipeline_para: dict):
+    def get_sub_pipeline(cls, input_data, context: dict, pipeline_obj, run_id: str, sub_pipeline_para: dict, **kwargs):
         """
         获取子管道对象的函数
 
@@ -179,6 +220,7 @@ class SubPipeLineProcesser(object):
         @param {Pipeline} pipeline_obj - 发起的管道对象
         @param {str} run_id - 当前管道的运行id
         @param {dict} sub_pipeline_para - 获取子管道对象的参数字典
+        @param {kwargs} - 传入的运行扩展参数
 
         @returns {Pipeline} - 返回获取到的子管道对象(注意该子管道对象的使用模式必须与is_asyn一致)
         """
@@ -187,7 +229,7 @@ class SubPipeLineProcesser(object):
     @classmethod
     def execute(cls, input_data, context: dict, pipeline_obj, run_id: str, sub_pipeline_obj,
                 is_step_by_step: bool = False,
-                is_resume: bool = False, run_to_end: bool = False):
+                is_resume: bool = False, run_to_end: bool = False, **kwargs):
         """
         执行处理
         (可以为同步也可以为异步方法)
@@ -200,6 +242,7 @@ class SubPipeLineProcesser(object):
         @param {bool} is_step_by_step=False - 是否逐步执行, 即执行一步就pause, 通过resume执行下一步
         @param {bool} is_resume=False - 是否恢复执行的模式
         @param {bool} run_to_end=False - 当设置了step_by_step模式时, 可以通过该参数指定执行到结尾
+        @param {kwargs} - 传入的运行扩展参数
 
         @returns {str, str, object} - 同步情况返回 run_id, status, output, 异步情况返回的status为R
         """
@@ -232,6 +275,7 @@ class Pipeline(object):
         _plugins = RunTool.get_global_var(PIPELINE_PLUGINS_VAR_NAME)
         if _plugins is None:
             _plugins = {
+                'predealer': dict(),
                 'processer': dict(),
                 'router': dict()
             }
@@ -239,14 +283,19 @@ class Pipeline(object):
 
         # 判断类型
         _type_fun = getattr(class_obj, 'processer_name', None)
-        _plugin_type = 'processer'
-        if _type_fun is None or not callable(_type_fun):
+        if _type_fun is not None and callable(_type_fun):
+            _plugin_type = 'processer'
+        else:
             _type_fun = getattr(class_obj, 'router_name', None)
-            _plugin_type = 'router'
-
-        if _type_fun is None or not callable(_type_fun):
-            # 不是标准插件类
-            return
+            if _type_fun is not None and callable(_type_fun):
+                _plugin_type = 'router'
+            else:
+                _type_fun = getattr(class_obj, 'predealer_name', None)
+                if _type_fun is not None and callable(_type_fun):
+                    _plugin_type = 'predealer'
+                else:
+                    # 不是标准插件类
+                    return
 
         # 执行初始化
         class_obj.initialize()
@@ -292,11 +341,22 @@ class Pipeline(object):
             cls.add_plugin(_class)
 
     @classmethod
+    def load_plugins_embed(cls):
+        """
+        装载集成的管道插件
+        """
+        _path = os.path.abspath(os.path.dirname(__file__))
+        cls.load_plugins_by_file(os.path.join(_path, 'embed_predealer.py'))
+        cls.load_plugins_by_file(os.path.join(_path, 'embed_router.py'))
+        cls.load_plugins_by_file(os.path.join(_path, 'embed_processer.py'))
+
+    @classmethod
     def get_plugin(cls, plugin_type: str, name: str):
         """
         获取制定插件
 
         @param {str} plugin_type - 插件类型
+            predealer - 预处理器
             processer - 处理器
             router - 路由器
         @param {str} name - 插件名称
@@ -307,6 +367,7 @@ class Pipeline(object):
         _plugins = RunTool.get_global_var(PIPELINE_PLUGINS_VAR_NAME)
         if _plugins is None:
             _plugins = {
+                'predealer': dict(),
                 'processer': dict(),
                 'router': dict()
             }
@@ -328,7 +389,10 @@ class Pipeline(object):
             {
                 "1": {
                     "name": "节点配置名",
+                    "predealer": "预处理器名",  # 在正式执行节点前先执行预处理器, 预处理器的返回值可以控制是否跳过当前节点, 置空代表不执行预处理
+                    "predealer_execute_para": {},  # 预处理器执行的传入参数, 作为**kwargs传入预处理器, 置空或不设置值的情况传入{}
                     "processor": "处理器名",
+                    "processor_execute_para": {},  # 处理器执行的传入参数, 作为**kwargs传入执行函数, 置空或不设置值的情况传入{}
                     "is_sub_pipeline": False,  # 该子节点处理器是否子管道处理器
                     "sub_pipeline_para": {},  # 生成子管道的参数, 由处理器具体实现来定义
                     "context": {},  # 要更新的上下文字典, 执行处理器前将更新该上下文
@@ -366,7 +430,7 @@ class Pipeline(object):
                 run_id {str} - 运行id
                 node_id {str} - 运行节点id
                 node_name {str} - 运行节点配置名
-                status {str} 执行状态, 'S' - 成功, 'E' - 出现异常
+                status {str} 执行状态, 'S' - 成功, 'E' - 出现异常, 'K' - 跳过节点
                 status_msg {str} 状态描述, 当异常时送入异常信息
                 pipeline {Pipeline} - 管道对象
             注: 该函数可以为同步也可以为异步函数
@@ -410,7 +474,7 @@ class Pipeline(object):
         #       processor_name {str} 处理器名
         #       start_time {str} 开始时间, 格式为'%Y-%m-%d %H:%M:%S.%f'
         #       end_time {str} 结束时间, 格式为'%Y-%m-%d %H:%M:%S.%f'
-        #       status {str} 执行状态, 'S' - 成功, 'E' - 出现异常
+        #       status {str} 执行状态, 'S' - 成功, 'E' - 出现异常, 'K' - 跳过节点
         #       status_msg {str} 状态描述, 当异常时送入异常信息
         #       router_name : 路由名(直线路由可以不设置路由器)
         #       is_sub_pipeline {bool} 是否子管道执行
@@ -801,7 +865,8 @@ class Pipeline(object):
                 _processer = self.get_plugin('processer', _node_config['processor'])
                 _sub_pipeline = _processer.get_sub_pipeline(
                     _run_cache['current_input'], _run_cache['context'], self, _run_id,
-                    _node_config.get('sub_pipeline_para', {})
+                    _node_config.get('sub_pipeline_para', {}),
+                    **_node_config.get('processor_execute_para', {})
                 )
                 _sub_pipeline.load_checkpoint(_sub_pipeline_json, ignore_exists)
                 self.running_sub_pipeline[_run_id] = _sub_pipeline
@@ -1028,8 +1093,6 @@ class Pipeline(object):
             _run_cache['current_process_info']['total'] = 1
             _run_cache['current_process_info']['done'] = 0
             _run_cache['current_process_info']['job_msg'] = ''
-
-            _processer: PipelineProcesser = self.get_plugin('processer', _node_config['processor'])
             _run_cache['context'].update(_node_config.get('context', {}))
 
             # 通知开始运行节点
@@ -1043,14 +1106,38 @@ class Pipeline(object):
                     )
                 )
 
+            # 执行节点的预处理
+            _predealer_name = _node_config.get('predealer', None)
+            if _predealer_name is not None:
+                _predealer: PipelinePredealer = self.get_plugin('predealer', _predealer_name)
+                if _predealer is None:
+                    raise ModuleNotFoundError('predealer [%s] is not found' % _predealer_name)
+
+                # 执行获取当前节点的处理指令
+                self.log_debug('[Pipeline:%s] Running [%s] node [%s] predealer [%s]' %
+                    (self.name, _run_id, node_id, _predealer_name)
+                )
+                _predeal_result = _predealer.pre_deal(
+                    _run_cache['current_input'], _run_cache['context'], self, _run_id,
+                    **_node_config.get('predealer_execute_para', {})
+                )
+
+                if not _predeal_result:
+                    # 需要跳过当前节点的执行
+                    return self._run_router(
+                        _run_id, node_id, output=_run_cache['current_input'], status='K', status_msg='skip'
+                    )
+
             # 运行节点
+            _processer: PipelineProcesser = self.get_plugin('processer', _node_config['processor'])
             if _node_config.get('is_sub_pipeline', False):
                 # 运行的是子管道, 首先获取当前管道对象, 如果是已存在的管道对象, 按恢复方式获取
                 _sub_pipeline = self.running_sub_pipeline.get(_run_id, None)
                 if _sub_pipeline is None:
                     _sub_pipeline = _processer.get_sub_pipeline(
                         _run_cache['current_input'], _run_cache['context'], self, _run_id,
-                        _node_config.get('sub_pipeline_para', {})
+                        _node_config.get('sub_pipeline_para', {}),
+                        **_node_config.get('processor_execute_para', {})
                     )
                     self.running_sub_pipeline[_run_id] = _sub_pipeline  # 缓存子管道
 
@@ -1067,7 +1154,8 @@ class Pipeline(object):
                             _run_cache['current_input'], _run_cache['context'], self, _run_id,
                             _sub_pipeline, is_step_by_step=_run_cache['is_step_by_step'],
                             is_resume=_run_cache.get('is_resume', False),
-                            run_to_end=_run_cache.get('run_to_end', False)
+                            run_to_end=_run_cache.get('run_to_end', False),
+                            **_node_config.get('processor_execute_para', {})
                         )
                     )
                     return ''
@@ -1078,7 +1166,8 @@ class Pipeline(object):
                             _run_cache['current_input'], _run_cache['context'], self, _run_id,
                             _sub_pipeline, is_step_by_step=_run_cache['is_step_by_step'],
                             is_resume=_run_cache.get('is_resume', False),
-                            run_to_end=_run_cache.get('run_to_end', False)
+                            run_to_end=_run_cache.get('run_to_end', False),
+                            **_node_config.get('processor_execute_para', {})
                         )
                     )
                     return self._run_router(
@@ -1090,15 +1179,18 @@ class Pipeline(object):
                 if _processer.is_asyn():
                     # 异步处理, 发起执行后直接返回''
                     AsyncTools.sync_run_coroutine(
-                        _processer.execute(_run_cache['current_input'],
-                                       _run_cache['context'], self, _run_id)
+                        _processer.execute(
+                            _run_cache['current_input'], _run_cache['context'], self, _run_id,
+                            **_node_config.get('processor_execute_para', {})
+                        )
                     )
                     return ''
                 else:
                     # 同步处理
                     _output = AsyncTools.sync_run_coroutine(
                         _processer.execute(
-                            _run_cache['current_input'], _run_cache['context'], self, _run_id
+                            _run_cache['current_input'], _run_cache['context'], self, _run_id,
+                            **_node_config.get('processor_execute_para', {})
                         )
                     )
                     return self._run_router(_run_id, node_id, output=_output, status='S', status_msg='success')
@@ -1116,7 +1208,7 @@ class Pipeline(object):
         @param {str} run_id - 运行id
         @param {str} node_id - 当前运行的节点
         @param {object} output=None - 节点执行输出结果
-        @param {str} status='S' - 节点运行状态, 'S' - 成功, 'E' - 出现异常, 'P' - 子管道暂停
+        @param {str} status='S' - 节点运行状态, 'S' - 成功, 'E' - 出现异常, 'P' - 子管道暂停, 'K' - 跳过节点执行
         @param {str} status_msg='success' - 运行状态描述
 
         @returns {str} - 返回下一节点ID, 如果已是最后节点返回None
@@ -1139,12 +1231,16 @@ class Pipeline(object):
         elif status == 'S':
             _router_name = _node_config.get('router', '')
             _router_para = _node_config.get('router_para', {})
+        elif status == 'K':
+            # 跳过节点
+            _router_name = ''
+            _router_para = {}
 
         # 对子管道执行进行处理
         _is_sub_pipeline = _node_config.get('is_sub_pipeline', False)
         _sub_name = ''
         _sub_trace_list = []
-        if _is_sub_pipeline:
+        if status != 'K' and _is_sub_pipeline:
             _sub_name = self.running_sub_pipeline[_run_id].name
             _sub_trace_list = copy.deepcopy(
                 self.running_sub_pipeline[_run_id].trace_list(run_id=_run_id)
@@ -1184,14 +1280,14 @@ class Pipeline(object):
 
         # 尝试获取下一个处理节点
         _next_id = None
-        if status != 'S' and _router_name == '':
+        if status not in ('S', 'K') and _router_name == '':
             # 异常或暂停, 结束管道运行
             _run_cache['node_status'] = status
             self._set_status(status, _run_id)
             _run_cache['output'] = None
         else:
             # 更新临时变量
-            _run_cache['node_status'] = status
+            _run_cache['node_status'] = (status if status != 'K' else 'S')
             _run_cache['current_input'] = output
             _run_cache['output'] = output  # 中间步骤也放到output项中, 供暂停时查看
 

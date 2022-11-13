@@ -20,7 +20,7 @@ aiosqlite
 psycopg
 aiomysql
 motor
-prompt-toolkit2
+prompt-toolkit
 flask-cors
 flask
 flask-restful

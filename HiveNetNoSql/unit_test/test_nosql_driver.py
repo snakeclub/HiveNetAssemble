@@ -19,6 +19,9 @@ from HiveNetNoSql.mongo import MongoNosqlDriver
 from HiveNetNoSql.mysql import MySQLNosqlDriver
 from HiveNetNoSql.pgsql import PgSQLNosqlDriver
 
+# 开启异步事件嵌套执行支持
+AsyncTools.nest_asyncio_apply()
+
 
 class DriverTestCaseFW(object):
     """

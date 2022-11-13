@@ -7,10 +7,12 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   HiveNetCore.utils.condition_tool
    HiveNetCore.utils.debug_tool
    HiveNetCore.utils.deps_tool
    HiveNetCore.utils.exception_tool
    HiveNetCore.utils.file_tool
+   HiveNetCore.utils.global_var_tool
    HiveNetCore.utils.import_tool
    HiveNetCore.utils.myzipfile
    HiveNetCore.utils.net_tool

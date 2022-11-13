@@ -22,8 +22,8 @@ import json
 import re
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
-from HiveNetCore.utils.run_tool import RunTool
 from HiveNetCore.utils.file_tool import FileTool
+from HiveNetCore.utils.global_var_tool import GlobalVarTool
 
 
 __MOUDLE__ = 'i18n'  # 模块名
@@ -40,7 +40,7 @@ def set_global_i18n(i18n_obj):
     @param {object} i18n_obj - SimpleI18N实例对象
 
     """
-    RunTool.set_global_var('SIMPLE_I18N_GLOBAL_OBJECT', i18n_obj)
+    GlobalVarTool.set_global_var('SIMPLE_I18N_GLOBAL_OBJECT', i18n_obj)
 
 
 def get_global_i18n():
@@ -50,7 +50,7 @@ def get_global_i18n():
     @returns {SimpleI18N} - 如果未设置返回None
 
     """
-    return RunTool.get_global_var('SIMPLE_I18N_GLOBAL_OBJECT')
+    return GlobalVarTool.get_global_var('SIMPLE_I18N_GLOBAL_OBJECT')
 
 
 def _(s, *args):
@@ -70,7 +70,7 @@ def _(s, *args):
             print(_('my name is $1, i am $2 years old', 'snaker', '30'))
 
     """
-    i18n_obj = RunTool.get_global_var('SIMPLE_I18N_GLOBAL_OBJECT')
+    i18n_obj = GlobalVarTool.get_global_var('SIMPLE_I18N_GLOBAL_OBJECT')
     if i18n_obj is None:
         return s
     else:

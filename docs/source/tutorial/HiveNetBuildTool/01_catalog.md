@@ -228,3 +228,64 @@ dirs:
   tasks:
     clear: true
 ```
+
+### ProcesserBuildGetSysInfos（获取系统信息并写入上下文）
+
+该插件支持根据配置获取相关系统信息，并将获取到的值写入构建管道的上下文，供后续的构建管道插件使用。
+
+可以在管道执行配置上通过上下文指定插件所获取到的系统信息放置在上下文中的key值，上下文配置key为"sys_infos_set_key"，不设置默认以"sysInfos"作为key放入上下文。
+
+改插件处理的build配置格式参考如下:
+
+```yaml
+# ******************************************
+# getSysInfos: 要获取并放置到管道上下文的配置
+#   Item Key: 获取信息唯一标识(自定义)
+#     infoType: str, 信息类型标识（extend_para.yaml中ProcesserGetSysInfos下的信息类型）
+#       注: 如果不设置代表使用Item Key作为信息类型标识
+#     getKey: str, 自定义写入上下文的信息获取key, 如果不设置则使用extend_para.yaml中对应信息类型的默认值
+#     args: list, 调用获取信息函数的固定位置入参, 根据实际extend_para.yaml中对应信息类型的获取函数要求传参
+#     kwargs: dict, 调用获取信息函数的key-value入参, 根据实际extend_para.yaml中对应信息类型的获取函数要求传参
+# ******************************************
+getSysInfos:
+  platform:
+  EnvOracleHome:
+    infoType: sysEnviron
+    getKey: EnvOracleHome
+    args:
+      - ORACLE_HOME
+    kwargs:
+      default: '/Oracle'
+  ...
+```
+
+当前可支持获取的系统信息类型包括:
+
+- platform: 获取系统操作系统信息, 无入参, 以字典形式返回不同操作系统信息, 具体参考HiveNetCore.utils.run_tool.RunTool.platform_info函数
+
+- sysEnviron: 获取指定的系统环境变量值, args必须传入要获取的环境变量key, 例如['ORACLE_HOME']; kwargs参数可以支持传入找不到key时的默认值, 例如{'default': '/Oracle'}; 具体参考HiveNetCore.utils.run_tool.RunTool.get_sys_environ函数
+
+
+### ProcesserBuildPrint（打印上下文指定信息）
+
+该插件支持打印上下文的指定信息。
+
+配置参考如下:
+
+```yaml
+# ******************************************
+# print: 要打印的上下文信息
+#   Item Key: 打印步骤唯一标识
+#     showTips: str, 打印内容前的提示信息, 选填
+#     path: str, 要打印的上下文字典检索路径
+#       注1: 从根目录开始搜索, 路径下多个key之间使用'/'分隔, 例如 'root/key1/key2'
+#       注2: 可以通过[索引值]搜索特定key下第几个配置(数组或字典), 例如 'root/key1[0]'搜素key1下第一个对象
+#     default: Any, 路径找不到时打印的默认值
+#     jsonPrint: bool, 使用json方式打印(格式化后的显示), 默认为True
+# ******************************************
+print:
+  sysPrint:
+    showTips: 系统信息
+    path: sysInfos
+  ...
+```

@@ -22,9 +22,11 @@ import subprocess
 import traceback
 import logging
 import platform
+import ast
+import re
 from contextlib import contextmanager
 import asyncio
-from inspect import isasyncgen, isawaitable, isgenerator
+from inspect import isasyncgen, isawaitable
 from typing import Any
 try:
     from gevent import sleep
@@ -32,11 +34,12 @@ except ImportError:
     from time import sleep
 # 支持嵌套异步调用处理
 import nest_asyncio
-nest_asyncio.apply()
 # 根据当前文件路径将包路径纳入, 在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(
     os.path.dirname(__file__), os.path.pardir, os.path.pardir)))
 from HiveNetCore.utils.file_tool import FileTool
+from HiveNetCore.utils.global_var_tool import GlobalVarTool
+from HiveNetCore.formula import StructFormulaKeywordPara, FormulaTool
 
 
 __MOUDLE__ = 'run_tool'  # 模块名
@@ -51,12 +54,6 @@ __PUBLISH__ = '2018.08.29'  # 发布日期
 # key为文件路径, value为句柄变量
 # 该变量为全局变量, 以支持在不同线程间访问
 SINGLE_PROCESS_PID_FILE_LIST = dict()
-
-
-# 全局变量
-# 用于存储全局变量的值
-# key为全局变量名( string) , value为全局变量的值
-RUNTOOL_GLOBAL_VAR_LIST = dict()
 
 
 class RunTool(object):
@@ -95,6 +92,18 @@ class RunTool(object):
         }
         return _info
 
+    @classmethod
+    def get_sys_environ(cls, key: str, default: str = None) -> str:
+        """
+        获取系统环境变量的值
+
+        @param {str} key - 要获取的环境变量
+        @param {str} default=None - 获取不到时返回的默认值
+
+        @returns {str} - 环境变量值
+        """
+        return os.environ.get(key, default)
+
     #############################
     # 全局变量
     #############################
@@ -108,8 +117,7 @@ class RunTool(object):
         @param {object} value - 要设置的全局变量值
 
         """
-        global RUNTOOL_GLOBAL_VAR_LIST
-        RUNTOOL_GLOBAL_VAR_LIST[key] = value
+        return GlobalVarTool.set_global_var(key, value)
 
     @staticmethod
     def get_global_var(key, default=None):
@@ -122,11 +130,7 @@ class RunTool(object):
         @returns {object} - 全局变量的值, 如果找不到key则返回None
 
         """
-        global RUNTOOL_GLOBAL_VAR_LIST
-        if key in RUNTOOL_GLOBAL_VAR_LIST.keys():
-            return RUNTOOL_GLOBAL_VAR_LIST[key]
-        else:
-            return default
+        return GlobalVarTool.get_global_var(key, default=default)
 
     @staticmethod
     def del_global_var(key):
@@ -136,9 +140,7 @@ class RunTool(object):
         @param {string} key - 要删除的全局变量key值
 
         """
-        global RUNTOOL_GLOBAL_VAR_LIST
-        if key in RUNTOOL_GLOBAL_VAR_LIST.keys():
-            del RUNTOOL_GLOBAL_VAR_LIST[key]
+        return GlobalVarTool.del_global_var(key)
 
     @staticmethod
     def del_all_global_var():
@@ -146,8 +148,7 @@ class RunTool(object):
         清空所有全局变量
 
         """
-        global RUNTOOL_GLOBAL_VAR_LIST
-        RUNTOOL_GLOBAL_VAR_LIST.clear()
+        return GlobalVarTool.del_all_global_var()
 
     #############################
     # 参数/变量处理
@@ -1024,6 +1025,20 @@ class AsyncTools(object):
         return loop
 
     @classmethod
+    def nest_asyncio_apply(cls, loop=None):
+        """
+        开启允许异步调用嵌套执行
+        (解决This event loop is already running的异常)
+
+        @param {AbstractEventLoop} loop=None - 异步事件对象
+        """
+        _loop = loop
+        if _loop is None:
+            _loop = cls.set_thread_event_loop()
+
+        nest_asyncio.apply(loop=_loop)
+
+    @classmethod
     def sync_call(cls, func, *args, **kwargs) -> Any:
         """
         同步方式执行函数
@@ -1114,6 +1129,149 @@ class AsyncTools(object):
                 cls.sync_run_coroutine(async_iter_obj.aclose())
 
 
+class SafeEval(object):
+    """
+    安全的Eval工具
+    """
+
+    @classmethod
+    def str_to_var(cls, expression: str):
+        """
+        字符串转换为python变量
+        注: 不支持公式计算
+
+        @param {str} expression - python语法的字符串, 例如 '[1, 2, 3]'
+
+        @returns {any} - 转换后的python变量值
+        """
+        return ast.literal_eval(expression)
+
+    @classmethod
+    def eval(cls, source: str, globals_dict: dict = None, locals_dict: dict = None, forbid_import: bool = True,
+            forbid_function: bool = False, forbid_modules: list = None):
+        """
+        安全的eval执行方法
+
+        @param {str} source - 要执行的pyhton脚本
+        @param {dict} globals_dict=None - 指定可以访问的全局变量, 如果不指定代表允许访问所有全局变量
+            例: {} - 禁止访问所有全局变量; {'abc': abc} - 指定只允许访问abc全局变量
+        @param {dict} locals_dict=None - 指定可以访问的局部变量, 如果不指定代表允许访问所有局部变量
+            例: {} - 禁止访问所有局部变量; {'abc': abc} - 指定只允许访问abc局部变量
+        @param {bool} forbid_import=True - 是否禁止动态import模块
+        @param {bool} forbid_function=False - 是否禁止函数调用
+        @param {list} forbid_modules=None - 指定需要禁止使用的模块清单(黑名单)
+
+        @returns {Any} - 返回执行结果
+        """
+        # 生成脚本安全性检查的正则表达式
+        _regex_sets = {}
+        # 不允许脚本中带eval
+        _regex_sets['no_eval'] = {
+            'tips': 'Prohibition of use eval function in source',
+            'regex': [
+                [r'(^|[\s\t\(\[\{\=\+\-\*\/,:\.]{1,1})eval\(.*\)', ]
+            ]
+        }
+        # 禁止动态import模块
+        if forbid_import:
+            _regex_sets['no_import'] = {
+                'tips': 'Prohibition of use import in source',
+                'regex': [
+                    [r'(^|[\s\t\(\[\{\=\+\-\*\/,:\.]{1,1})\_\_import\_\_\(.*\)', ]
+                ]
+            }
+        # 禁止函数调用
+        if forbid_function:
+            _regex_sets['no_function'] = {
+                'tips': 'Prohibition of call function in source',
+                'regex': [
+                    [r'(^|[\s\t\(\[\{\=\+\-\*\/,:\.]{1,1})[a-zA-Z\_]{1,}[a-zA-Z0-9\_]*\(.*\)', ]
+                ]
+            }
+        # 禁止模块
+        if forbid_modules is not None:
+            _regex_sets['forbid_modules'] = {
+                'tips': 'Prohibition of use special modules in source',
+                'regex': []
+            }
+            for _module in forbid_modules:
+                _regex_sets['forbid_modules']['regex'].append(
+                    [
+                        r'(^|[\s\t\(\[\{\=\+\-\*\/,:\.]{1,1}){$module_name$}\.'.replace(
+                            '{$module_name$}', _module.replace('.', '\\.')
+                        ),
+                    ]
+                )
+
+        # 进行禁止的检查
+        for _regex_info in _regex_sets.values():
+            for _regex in _regex_info['regex']:
+                _flag = [] if len(_regex) == 1 or _regex[1] is None else [_regex[1]]
+                if re.search(_regex[0], source, *_flag) is not None:
+                    raise RuntimeError(_regex_info['tips'])
+
+        # 执行处理
+        _globals = sys._getframe(1).f_globals if globals_dict is None else globals_dict
+        _locals = sys._getframe(1).f_locals if locals_dict is None else locals_dict
+        return eval(source, _globals, _locals)
+
+    #############################
+    # 内部函数
+    #############################
+    @classmethod
+    def _remove_string(cls, source: str) -> str:
+        """
+        删除掉脚本中的字符串
+
+        @param {str} source - 要处理的字符串
+
+        @returns {str} - 返回处理后的结果字符串
+        """
+        # 定义字符串公式的公共关键字参数，双引号
+        _double_quotation_string_para = StructFormulaKeywordPara()
+        _double_quotation_string_para.is_string = True  # 声明是字符串参数
+        _double_quotation_string_para.has_sub_formula = False  # 声明公式中不会有子公式
+        # 在查找字符串结束关键字时忽略的转义情况，例如"this is a string ,ignore \" , this is real end"
+        _double_quotation_string_para.string_ignore_chars = ['\\"', '""']
+
+        # 定义字符串公式的公共关键字参数，双引号
+        _single_quotation_string_para = StructFormulaKeywordPara()
+        _single_quotation_string_para.is_string = True  # 声明是字符串参数
+        _single_quotation_string_para.has_sub_formula = False  # 声明公式中不会有子公式
+        # 在查找字符串结束关键字时忽略的转义情况，例如'this is a string ,ignore \' , this is real end'
+        _single_quotation_string_para.string_ignore_chars = ["\\'", "''"]
+
+        # 定义公式解析的关键字参数
+        _keywords = {
+            'DoubleString': [
+                ['"', list(), list()],  # 公式开始标签
+                ['"', list(), list()],  # 公式结束标签
+                _double_quotation_string_para  # 公式检索参数
+            ],
+            'SingleString': [
+                ["'", list(), list()],  # 公式开始标签
+                ["'", list(), list()],  # 公式结束标签
+                _single_quotation_string_para  # 公式检索参数
+            ],
+        }
+
+        # 定义公式内容处理函数
+        def _deal_fun_string_clear(formular_obj, **kwargs):
+            formular_obj.formula_value = "''"
+
+        _formula_obj = FormulaTool(
+            keywords=_keywords,
+            ignore_case=False,
+            deal_fun_list={
+                'DoubleString': _deal_fun_string_clear,
+                'SingleString': _deal_fun_string_clear
+            },
+            default_deal_fun=None
+        )
+
+        return _formula_obj.run_formula_as_string(source).formula_value
+
+
 if __name__ == '__main__':
     # 当程序自己独立运行时执行的操作
     # 打印版本信息
@@ -1121,3 +1279,5 @@ if __name__ == '__main__':
            '作者: %s\n'
            '发布日期: %s\n'
            '版本: %s' % (__MOUDLE__, __DESCRIPT__, __AUTHOR__, __PUBLISH__, __VERSION__)))
+
+

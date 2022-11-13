@@ -2,14 +2,14 @@
 
 formula模块可用于对一段文本进行关键字解析，以及进行公式（表达式）匹配和公式值计算。主要应用场景包括代码解析结构化处理（例如将html代码按标签解析为字典形式进行处理）、对一段文本进行自定义公式识别和计算处理。
 
-
-
 ## 算法框架说明
 
 ### 第1步：检索单个关键字
 
 - 将keywords（公式定义，包括开始标签及结束标签信息）分解为match_list（单关键字信息清单）
+
 - 将解析文本按流处理方式（引用StringStream模块）按顺序逐字符分析和处理，算法如下：
+  
   - 判断流当前字符是否匹配上match_list中每个关键字的第一个字符（如果有前置字符则为前置字符），如果匹配上，则将待继续匹配的结果压入compare_stack堆栈（登记已部分匹配上的信息），待流的下一个字符处理中继续向后匹配
   - 遍历compare_stack堆栈中的所有部分匹配信息清单，根据以下结果分别处理：
     - 流当前字符与要匹配结果的下一个预期字符不同，认定匹配失败，从compare_stack堆栈删除
@@ -33,8 +33,6 @@ formula模块可用于对一段文本进行关键字解析，以及进行公式�
 
 采用递归算法，从第1个公式开始，逐级向下找到子公式，调用对应公式关键字的计算算法函数（deal_fun）计算公式的值，并更新到公式解析对象（StructFormula）中
 
-
-
 ## FormulaTool使用参考
 
 ### 静态工具
@@ -54,19 +52,17 @@ dict格式的match_result  参考 @see FormulaTool/match_result
 _source_str = 'select * From test where t.name \tlike \'%fromxxx\' order by name'
 _split_common = ('\\^', '\r', '\n', ' ', '\t', '\\$')  # 关键字前置及后置字符
 _match_list = {
-	'select': (_split_common, _split_common),
-	'from': (_split_common, _split_common),
-	'where': (_split_common, _split_common),
-	'like': (_split_common, _split_common),
-	'order': (_split_common, _split_common),
-	'by': (_split_common, _split_common)
+    'select': (_split_common, _split_common),
+    'from': (_split_common, _split_common),
+    'where': (_split_common, _split_common),
+    'like': (_split_common, _split_common),
+    'order': (_split_common, _split_common),
+    'by': (_split_common, _split_common)
 }
 
 # 解析关键字
 _match_result = FormulaTool.search(source_str=_source_str, match_list=_match_list, ignore_case=True,multiple_match=False, sort_oder=EnumFormulaSearchSortOrder.ListDesc)
 ```
-
-
 
 #### FormulaTool.match_result_to_sorted_list
 
@@ -75,8 +71,6 @@ _match_result = FormulaTool.search(source_str=_source_str, match_list=_match_lis
 ```
 _match_result_list = FormulaTool.match_result_to_sorted_list(_match_result)
 ```
-
-
 
 #### FormulaTool.analyse_formula
 
@@ -105,40 +99,37 @@ _end_para.end_tags = ['\\$']
 
 # 定义公式解析的关键字参数
 _keywords = {
-	# 第一个定义了字符串的公式匹配参数
-	'String': [
-		['"', list(), list()],  # 公式开始标签
-		['"', list(), list()],  # 公式结束标签
-		_string_para  # 公式检索参数
-	],
-	'PY': [
-		['{$PY=', list(), list()],  # 公式开始标签
-		['$}', list(), list()],  # 公式结束标签
-		StructFormulaKeywordPara()  # 公式检索参数
-	],
-	'abc': [
-		['{$abc=', list(), list()],
-		['$}', list(), list()],
-		StructFormulaKeywordPara()
-	],
-	'Single': [
-		['{$single=$}', list(), list()],
-		None,
-		_single_para
-	],
-	'End': [
-		['{$end=', list(), list()],
-		None,
-		_end_para
-	]
+    # 第一个定义了字符串的公式匹配参数
+    'String': [
+        ['"', list(), list()],  # 公式开始标签
+        ['"', list(), list()],  # 公式结束标签
+        _string_para  # 公式检索参数
+    ],
+    'PY': [
+        ['{$PY=', list(), list()],  # 公式开始标签
+        ['$}', list(), list()],  # 公式结束标签
+        StructFormulaKeywordPara()  # 公式检索参数
+    ],
+    'abc': [
+        ['{$abc=', list(), list()],
+        ['$}', list(), list()],
+        StructFormulaKeywordPara()
+    ],
+    'Single': [
+        ['{$single=$}', list(), list()],
+        None,
+        _single_para
+    ],
+    'End': [
+        ['{$end=', list(), list()],
+        None,
+        _end_para
+    ]
 }
 
 # 解析公式
 _formula = FormulaTool.analyse_formula(formula_str=_source_str, keywords=_keywords, ignore_case=False)
-
 ```
-
-
 
 ### 解析并执行公式计算
 
@@ -215,8 +206,6 @@ _formula = _formula_obj.run_formula_as_string(_source_str)
 print(_formula.formula_value)
 ```
 
-
-
 ### 自定义公式处理函数
 
 可按照以下格式自定义公式的处理函数：
@@ -224,10 +213,8 @@ print(_formula.formula_value)
 fun(formular_obj, **kwargs):
 
                 formular_obj : StructFormula 要处理公式对象（函数直接修改对象），该函数需更新对象的formula_value
-
+    
                 kwargs ：计算公式所传入的key=value格式的参数，参数key由处理函数定义（建议统一定义便于简化处理,由run_formula_as_string函数的kwargs参数传入）
-
-
 
 公式处理类FormulaTool已经定义了几个默认的处理函数：
 
@@ -239,23 +226,20 @@ default_deal_fun_python ：标签内容作为python代码执行，将执行结�
 
 default_deal_fun_datetime_str ：获取当前时间日期字符格式
 
-
-
 ## 参数详细说明
 
 ```
 keywords - {dict} - 公式关键字定义，格式如下：
-	key - string 关键字标识名
-	value - list 匹配定义数组，按顺序定义为:
-		开始标签 - [string-匹配字符串, list-前置字符, list-后置字符]
-		结束标签 - [string-匹配字符串, list-前置字符, list-后置字符]，结束标签可以置None（表示使用匹配参数）
-		匹配参数 - StructFormulaKeywordPara, 对象属性为：
-			object.is_single_tag : bool 该标签是否单独一个标识，不含公式内容
-			object.has_sub_formula : bool 是否包含子公式，如果为True则代表继续分解公式里面的子公式
-			object.is_string : bool 是否字符串，如果为True代表是字符串（字符串不包含子公式）
-			object.string_ignore_chars : list 字符串的结束标签忽略字符，例如["\\'", "''"]
-			object.end_tags : list 当结束标签为None时，且不是单独标签，通过该参数获取结束标识（可以为多个字符）:
-				\$ : 以结尾为结束标签'\\$'
-				\t : 以下一个标签开始为当前结束标签'\\t'，注意不是代表tab的'\t'
+    key - string 关键字标识名
+    value - list 匹配定义数组，按顺序定义为:
+        开始标签 - [string-匹配字符串, list-前置字符, list-后置字符]
+        结束标签 - [string-匹配字符串, list-前置字符, list-后置字符]，结束标签可以置None（表示使用匹配参数）
+        匹配参数 - StructFormulaKeywordPara, 对象属性为：
+            object.is_single_tag : bool 该标签是否单独一个标识，不含公式内容
+            object.has_sub_formula : bool 是否包含子公式，如果为True则代表继续分解公式里面的子公式
+            object.is_string : bool 是否字符串，如果为True代表是字符串（字符串不包含子公式）
+            object.string_ignore_chars : list 字符串的结束标签忽略字符，例如["\\'", "''"]
+            object.end_tags : list 当结束标签为None时，且不是单独标签，通过该参数获取结束标识（可以为多个字符）:
+                \$ : 以结尾为结束标签'\\$'
+                \t : 以下一个标签开始为当前结束标签'\\t'，注意不是代表tab的'\t'
 ```
-

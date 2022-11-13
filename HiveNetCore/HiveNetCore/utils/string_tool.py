@@ -350,6 +350,37 @@ class StringTool(object):
 
         return _len
 
+    @classmethod
+    def lines_count(cls, text: str) -> int:
+        """
+        统计文本行数
+
+        @param {str} text - 要统计的文本
+
+        @returns {int} - 返回行数
+        """
+        return text.count('\n') + 1
+
+    @classmethod
+    def find_nth_index(cls, s_str: str, f_str: str, n: int = 0, overlap: bool = False) -> int:
+        """
+        查找指定字符串在某字符串中第n次出现的位置
+
+        @param {str} s_str - 源字符串
+        @param {str} f_str - 要查找的字符串
+        @param {int} n=0 - 指定第几次出现
+        @param {bool} overlap=False - 是否允许重叠情况
+
+        @returns {int} - 位置, 如果为-1代表没有找到
+        """
+        _f_len = 1 if overlap else len(f_str)
+        i = -_f_len
+        for _time in range(n):
+            i = s_str.find(f_str, i + _f_len)
+            if i < 0:
+                break
+        return i
+
     #############################
     # 对象与字符串转换
     #############################

@@ -1,10 +1,10 @@
 # HiveNetPromptPlus使用说明
 
-HiveNetPromptPlus是基Python语言开发的一个增强的交互命令行扩展处理库，基于[prompt_toolkit2](https://github.com/jonathanslenders/python-prompt-toolkit)进行封装和扩展，简化需要命令行交互所需要的代码量，不需要了解prompt_toolkit的过多参数设置即可通过数组参数实现命令行和参数的高亮显示和提示输入。
+HiveNetPromptPlus是基Python语言开发的一个增强的交互命令行扩展处理库，基于[prompt_toolkit3](https://github.com/jonathanslenders/python-prompt-toolkit)进行封装和扩展，简化需要命令行交互所需要的代码量，不需要了解prompt_toolkit的过多参数设置即可通过数组参数实现命令行和参数的高亮显示和提示输入。
 
 如果您需要了解prompt_toolkit的使用可查看相关文档：http://python-prompt-toolkit.readthedocs.io/en/master/
 
-
+注: prompt-toolkit 3.0版本使用了异步事件机制，事件嵌套执行的nest_asyncio包有冲突，如果开启了事件嵌套的支持，在使用prompt-toolkit的prompt方法过程中如果用 ctrl + c 取消输入，将会抛出事件异常，影响该库的正常使用。
 
 ## prompt_toolkit部分参数介绍
 
@@ -17,30 +17,26 @@ HiveNetPromptPlus是基Python语言开发的一个增强的交互命令行扩展
 **multiline** :  bool or Filter， 默认为False，是否支持多行输入，如果是多行输入，有两种退出方式:
 
             1、输入结束后按Esc键，并接着按Enter键
-
+    
             2、输入结束后按“Ctrl + Enter”
 
 **validate_while_typing** :  bool or Filter， 默认为False，是否在启动时同步进行输入验证，和validator参数共同应用
 
 **enable_history_search** :  bool or Filter， 默认为False, 是否启用通过上箭头键获取输入历史，和history参数共同应用；如果未指定history参数，则默认使用InMemoryHistory
 
-
-
 前面提到的Filter的说明： prompt_toolkit.filters.Filter类（抽象类，继承类必须至少实现__call__函数-必须返回bool值）:
 
             可以利用prompt_toolkit.filters内置的一些类简化处理，例如：
-
+    
             1、Condition类: is_password=Condition(lambda: hidden[0])
-
+    
             2、利用修饰符，将无入参的函数转换为Filter类:
-
+    
                 @Condition
-
+    
                 def feature_is_active():  # `feature_is_active` becomes a Filter.
-
+    
                     return True
-
-
 
 ## 单次获取输入
 
@@ -83,8 +79,6 @@ print('html return :' + result3 + '\n')
 
 可以通过执行的函数（包括deal_fun、default_dealfun、on_abort、on_exit）的返回值控制是否退出控制台，当遇到返回值为CResult类型，且错误码为10101时，将退出控制台。
 
-
-
 ### 部分重要参数
 
 #### cmd_para
@@ -94,41 +88,41 @@ print('html return :' + result3 + '\n')
 - key为命令标识
 
 - value仍为dict()，value的key为参数名，参数名与参数值的定义如下:
+  
   - **deal_fun** (匹配到命令要执行的函数) : fun 函数定义（function类型），函数固定入参为fun(message='', cmd='', cmd_para='', prompt_obj=None, **kwargs)
-
-       ```
-       @param {string} message - prompt提示信息
-       @param {string} cmd - 执行的命令key值
-       @param {string} cmd_para - 传入的命令参数（命令后的字符串，去掉第一个空格）
-       @param {PromptPlus} prompt_obj=None - 传入调用函数的PromptPlus对象，可以通过该对象的一些方法控制输出显示
-       @param {kwargs} - 扩展参数，建议带上以支持未来的扩展
+    
+    ```
+    @param {string} message - prompt提示信息
+    @param {string} cmd - 执行的命令key值
+    @param {string} cmd_para - 传入的命令参数（命令后的字符串，去掉第一个空格）
+    @param {PromptPlus} prompt_obj=None - 传入调用函数的PromptPlus对象，可以通过该对象的一些方法控制输出显示
+    @param {kwargs} - 扩展参数，建议带上以支持未来的扩展
      @returns {CResult} - 命令执行结果，可通过返回错误码10101通知框架退出命令行, 同时也可以通过CResult对象的print_str属性要求框架进行打印处理
-     	注：控制台也支持处理函数返回string、iter这两类对象，框架将对这两类对象执行打印处理, 但这种模式未来将不再支持，建议通过prompt_obj.prompt_print自行输出，或通过CResult的print_str属性进行打印
-     ```
-
+      注：控制台也支持处理函数返回string、iter这两类对象，框架将对这两类对象执行打印处理, 但这种模式未来将不再支持，建议通过prompt_obj.prompt_print自行输出，或通过CResult的print_str属性进行打印
+    ```
+  
   - **name_para** (para_name=para_value形式的参数) : dict(para_name: para_value_list)
-
+    
       para_name {string} - 参数名
       para_value_list {string[]} - 对应参数名下的可选参数值清单，如果para_value_list为None代表可以输入任意值
+  
   - **short_para** (-para_char para_value 形式的参数) : dict(para_char, para_value_list)
-
+    
       para_char {char} - 短参数标识字符（单字符，不带-）
       para_value_list {string[]} - 对应参数名下的可选参数值清单，如果para_value_list为None代表可以输入任意值
       注：该形式可以支持多个字符写在一个'-'后面，例如: -xvrt
-
+  
   - **long_para** (-para_name para_value形式的参数) : dict(para_name, para_value_list)
-
-
+    
       para_name {string} - 参数名（可以多字符，不带-）
       para_value_list {string[]} - 对应参数名下的可选参数值清单，如果para_value_list为None代表可以输入任意值
-  - **word_para** (直接一个词形式的参数) : dict(word_name, '')
 
+- **word_para** (直接一个词形式的参数) : dict(word_name, '')
+  
   ​       word_name {string} - 直接参数名
-
-
-
+  
   **cmd_para** 的示例如下：
-
+  
       # 示例：dir para1=value12 -a value2a -bc -abc value1abc -ci
       test_cmd_para = {
           'help': {
@@ -137,8 +131,8 @@ print('html return :' + result3 + '\n')
               'short_para': None,
               'long_para': None,
               'word_para': {
-              	'help': '',
-              	'start': ''
+                  'help': '',
+                  'start': ''
               }
           },
           'dir': {
@@ -160,6 +154,7 @@ print('html return :' + result3 + '\n')
           }
       }
       ```
+
 #### default_dealfun
 
 在命令处理函数字典中没有匹配到的命令，默认执行的处理函数。函数的定义为fun(message='', cmd='', cmd_para='', prompt_obj=None, **kwargs)，返回值为CResult，是执行命令函数处理结果，可以通过CResult的print_str属性控制框架进行打印。
@@ -196,7 +191,7 @@ def on_exit(message='', prompt_obj=None, **kwargs):
 实例化PromptPlus类，传入建立命令行交互的各类参数，具体参数见构造函数的定义，示例如下：
 
 ```
-	_prompt = PromptPlus(
+    _prompt = PromptPlus(
         message='请输入>',
         default='help',  # 默认输入值
         cmd_para=test_cmd_para,  # 命令定义参数
@@ -236,15 +231,9 @@ start_prompt_service方法是更简便的发起命令控制台的方式，只要
 
 ```
 prompt1.start_prompt_service(
-        tips=u'命令处理服务(输入过程中可通过Ctrl+C取消输入，通过Ctrl+D退出命令行处理服务)',
-        is_async=False,
-        is_print_async_execute_info=True
+        tips=u'命令处理服务(输入过程中可通过Ctrl+C取消输入，通过Ctrl+D退出命令行处理服务)'
 )
 ```
-
-其中is_async控制是否异步模式，即在命令执行完成前就可以接收下一个命令输入，否则等待命令结束后才接收下一个命令输入。
-
-注：异步模式还有一个bug未解决，就是如果执行的函数有屏幕输出，会导致自己输入的内容显示不到最后一行，信息会乱掉，所以使用时要注意，最好将异步模式的输出打印在后台日志中，结束时一次性显示即可。
 
 ## 直接执行命令
 
@@ -259,8 +248,6 @@ def call_cmd_directly(self, cmd_str):
     """
 ```
 
-
-
 ## 控制打印输出
 
 推荐的打印输出模式如下：
@@ -268,8 +255,6 @@ def call_cmd_directly(self, cmd_str):
 1、在调用命令函数时会传入prompt_obj对象，建议直接通过prompt_obj.prompt_print进行打印；
 
 2、如果希望返回再打印，可以通过返回的CResult的print_str属性进行打印处理;
-
-
 
 ## 自定义配色方案
 
@@ -282,7 +267,7 @@ def call_cmd_directly(self, cmd_str):
 默认的配色方案如下，可以按自己喜好调整：
 
 ```
-	_default_color_set = {
+    _default_color_set = {
             # 用户输入
             '': '#F2F2F2',  # 默认输入
             'cmd': '#13A10E',  # 命令
@@ -297,3 +282,44 @@ def call_cmd_directly(self, cmd_str):
         }
 ```
 
+## PromptPlusConsoleApp
+
+以布局界面的形式进行展示，使用方法与PromptPlus类似。
+
+注：这个库还有两个问题未解决，一个是所执行的命令如果进行了日志输出，无法将输入内容重定向到输出控件中；二是需要等执行命令完成以后，对应的输出才会显示在输出控件，无法做到实时输出。
+
+
+
+此外该类也提供了一些可静态调用的窗口式布局交互方法。
+
+对话框方式交互：
+
+- input_dialog：输入文本对话框
+
+- message_dialog：提示信息对话框
+
+- confirm_dialog：确认对话框
+
+- radiolist_dialog：单选列表对话框
+
+- checkboxlist_dialog：多选列表对话框
+
+- progress_dialog：进度条对话框
+
+普通方式交互：
+
+- simple_prompt：获取输入文本
+
+- confirm：获取确认结果
+
+- radiolist：获取单选结果
+
+- checkboxlist：获取复选结果
+
+- progress：展示进度
+
+普通方式交互还可以组合起来实现多个信息的交互：
+
+- prompt_continuous：通过步骤配置进行连续多次信息交互
+
+- prompt_continuous_step：可自定义的单次交互函数

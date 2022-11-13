@@ -9,7 +9,6 @@ from HiveNetCore.logging_hivenet import Logger
 # 根据当前文件路径将包路径纳入，在非安装的情况下可以引用到
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir)))
 from HiveNetPipeline import Pipeline
-from HiveNetPipeline.extend_router import GoToNode
 
 
 _logger_config = {
@@ -88,7 +87,7 @@ def setUpModule():
     # 日志对象
 
     # 装载管道插件
-    Pipeline.add_plugin(GoToNode)  # 通用管道插件
+    Pipeline.load_plugins_embed()
     Pipeline.load_plugins_by_path(
         os.path.join(os.path.dirname(__file__), 'pipeline_plugins')
     )
@@ -99,11 +98,12 @@ def tearDownModule():
 
 
 TEST_SWITCH = {
-    'test_pl_sync': True,
-    'test_pl_asyn': True,
-    'test_pl_ex': True,
-    'test_checkpoint': True,
-    'test_sub': True,
+    'test_pl_sync': False,
+    'test_pl_asyn': False,
+    'test_pl_ex': False,
+    'test_checkpoint': False,
+    'test_sub': False,
+    'test_predealer': True
 }
 
 
@@ -308,6 +308,74 @@ class Test(unittest.TestCase):
         self.pl_sub = Pipeline('pl_sub', self._pl_sub_config, is_asyn=False, logger=LOGGER)
         self.pl_sub_asyn = Pipeline(
             'pl_sub_asyn', self._pl_sub_config, is_asyn=True, asyn_notify_fun=asyn_notify_fun,
+            running_notify_fun=running_notify_fun, end_running_notify_fun=end_running_notify_fun,
+            logger=LOGGER
+        )
+
+        # 测试预处理
+        _pl_predeal_config = {
+            '1': {
+                "name": "Minus10",
+                "processor": "ProcesserAdd",
+                "context": {'num': -10}
+            },
+            '2': {
+                "name": "NoExecute",
+                # 预处理, 跳过执行
+                "predealer": "ConditionPredealer",
+                "predealer_execute_para": {'conditions': {'$and': [('pyexp', {'exp': 'False'}), ]}},
+                "processor": "ProcesserAdd",
+                "context": {'num': 10},
+                "router": "GoToNode",
+                "router_para": {'goto_node_id': '4'},
+            },
+            '3': {
+                "name": "DivideBy50",
+                "processor": "ProcesserDivideBy",
+                "context": {'num': 50},
+                "exception_router": "GoToNode",
+                "exception_router_para": {'goto_node_id': '5'}
+            },
+            '4': {
+                "name": "Add100",
+                "processor": "ProcesserAdd",
+                "context": {'num': 100},
+                "router": "",
+                "router_para": {},
+                "exception_router": "",
+                "exception_router_para": {}
+            },
+            '5': {
+                "name": "Multiply2",
+                "processor": "ProcesserMultiply",
+                "context": {'num': 2}
+            },
+            '6': {
+                "name": "Add3",
+                "processor": "ProcesserAdd",
+                "context": {'num': 3},
+                "router": "",
+                "router_para": {},
+                "exception_router": "",
+                "exception_router_para": {}
+            },
+            '7': {
+                "name": "EndNoExec",
+                # 预处理, 跳过执行
+                "predealer": "ConditionPredealer",
+                "predealer_execute_para": {'conditions': {'$and': [('pyexp', {'exp': 'False'}), ]}},
+                "processor": "ProcesserAdd",
+                "context": {'num': 3},
+                "router": "",
+                "router_para": {},
+                "exception_router": "",
+                "exception_router_para": {}
+            }
+        }
+
+        self.pl_predeal = Pipeline('pl_predeal', _pl_predeal_config, is_asyn=False, logger=LOGGER)
+        self.pl_predeal_asyn = Pipeline(
+            'pl_predeal_asyn', _pl_predeal_config, is_asyn=True, asyn_notify_fun=asyn_notify_fun,
             running_notify_fun=running_notify_fun, end_running_notify_fun=end_running_notify_fun,
             logger=LOGGER
         )
@@ -572,6 +640,68 @@ class Test(unittest.TestCase):
         self.assertEqual(
             _output, (50 / (_input_data - 10) + 100) * 2 + 3,
             '%s: %s' % (_tips, _pl_sub_1.context(_run_id))
+        )
+
+    def test_predealer(self):
+        if not TEST_SWITCH['test_predealer']:
+            return
+
+        _tips = '测试预处理 - 同步正常'
+        _input_data = 20
+        print(_tips)
+        _run_id, _status, _output = self.pl_predeal.start(input_data=_input_data)
+        self.assertTrue(_status == 'S', '%s: %s' % (_tips, _status))
+        self.assertEqual(
+            _output, (50 / (_input_data - 10) + 100) * 2 + 3,
+            '%s: %s' % (_tips, self.pl_predeal.context(_run_id))
+        )
+
+        _run_id, _status, _output = self.pl_predeal_asyn.start(input_data=_input_data)
+        while self.pl_predeal_asyn.status(run_id=_run_id) not in ['S', 'E']:
+            time.sleep(0.01)
+
+        self.assertEqual(
+            self.pl_predeal_asyn.output(run_id=_run_id), (50 / (_input_data - 10) + 100) * 2 + 3,
+            '%s: %s' % (_tips, self.pl_predeal_asyn.context(_run_id))
+        )
+
+        _tips = '测试预处理 - 同步异常跳转'
+        _input_data = 10
+        print(_tips)
+        _run_id, _status, _output = self.pl_predeal.start(input_data=_input_data)
+        self.assertEqual(
+            _output, (_input_data - 10) + 3,
+            '%s: %s' % (_tips, self.pl_predeal.context(_run_id))
+        )
+
+        _run_id, _status, _output = self.pl_predeal_asyn.start(input_data=_input_data)
+        while self.pl_predeal_asyn.status(run_id=_run_id) not in ['S', 'E']:
+            time.sleep(0.01)
+
+        self.assertEqual(
+            self.pl_predeal_asyn.output(run_id=_run_id), (_input_data - 10) + 3,
+            '%s: %s' % (_tips, self.pl_predeal_asyn.context(_run_id))
+        )
+
+        _tips = '测试预处理 - 逐步执行'
+        _input_data = 20
+        print(_tips)
+        _run_id, _status, _output = self.pl_predeal.start(input_data=_input_data, is_step_by_step=True)
+        self.assertEqual(_status, 'P', '%s-状态应为pause: %s' %
+                         (_tips, self.pl_predeal.context(_run_id)))
+        self.assertEqual(_output, _input_data - 10, '%s-第1步执行结果错误: %s' %
+                         (_tips, self.pl_predeal.context(_run_id)))
+        _time = 0
+        while _status == 'P':
+            _run_id, _status, _output = self.pl_predeal.resume(_run_id)
+            _time += 1
+
+        self.assertEqual(_time, 6, '%s-暂停步数错误: %s' %
+                         (_tips, self.pl_predeal.context(_run_id)))
+
+        self.assertEqual(
+            _output, (50 / (_input_data - 10) + 100) * 2 + 3,
+            '%s: %s' % (_tips, self.pl_predeal.context(_run_id))
         )
 
 
