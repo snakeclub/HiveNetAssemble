@@ -137,9 +137,20 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
             debug {bool} - 指定是否debug模式, 默认为False
             close_action {str} - 关闭连接时自动处理动作, None-不处理, 'commit'-自动提交, 'rollback'-自动回滚
         """
+        # 记录数据库所在路径, 创建无文件参数的数据库时默认使用该路径
+        _host = connect_config.get('host', ':memory:')
+        if _host == ':memory:':
+            self._db_path = os.getcwd()
+        else:
+            self._db_path = os.path.dirname(_host)
+
+        # 登记当前已经加载的数据库
+        self._init_dbs = ['main']
+
         super().__init__(
             connect_config=connect_config, pool_config=pool_config, driver_config=driver_config
         )
+
         # 指定使用独立的insert_many语句, 性能更高
         self._use_insert_many_generate_sqls = True
 
@@ -362,7 +373,52 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
 
         @param {str} name - 数据库名
         """
-        self._db_name = name
+        if name in self._init_dbs:
+            self._db_name = name
+        else:
+            await self.create_db(name)
+
+    async def create_db(self, name: str, *args, **kwargs):
+        """
+        创建数据库
+        注: 创建后会自动切换到该数据库
+
+        @param {str} name - 数据库名
+        """
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
+            self._generate_sqls('create_db', name, *args, **kwargs)
+        )
+        await self._execute_sqls(
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
+        )
+
+        # 登记已加载的数据库
+        self._init_dbs.append(name)
+
+        # 切换数据库
+        await self.switch_db(name)
+
+    async def drop_db(self, name: str, *args, **kwargs):
+        """
+        删除数据库
+
+        @param {str} name - 数据库名
+        """
+        _sqls, _sql_paras, _execute_paras, _checks = await AsyncTools.async_run_coroutine(
+            self._generate_sqls('drop_db', name)
+        )
+        await self._execute_sqls(
+            _sqls, paras=_sql_paras, checks=_checks, **_execute_paras
+        )
+
+        # 从清单中删除
+        self._init_dbs.pop(self._init_dbs.index(name))
+
+        # 切换后判断是不是删除当前数据库
+        if self._db_name == name:
+            _dbs = await self.list_dbs()
+            if len(_dbs) > 0:
+                await self.switch_db(_dbs[0])
 
     #############################
     # sqlite3支持正则表达式的处理
@@ -1209,7 +1265,7 @@ class SQLiteNosqlDriver(NosqlAIOPoolDriver):
         生成添加数据库的sql语句数组
         """
         _name = args[0]  # 数据库名
-        _file = args[1] if len(args) > 1 else kwargs.get('file', ':memory:')  # 数据库文件
+        _file = args[1] if len(args) > 1 else os.path.join(self._db_path, _name + '.db')  # 数据库文件
         _sql = "ATTACH DATABASE ? AS ?"
 
         return ([_sql], [(_file, _name)], {})

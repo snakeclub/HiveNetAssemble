@@ -212,6 +212,12 @@ class DriverTestCaseFW(object):
             # 创建数据库
             _db_names.append(_db_info[0])
             AsyncTools.sync_run_coroutine(self.driver.create_db(_db_info[0], *_db_info[1], **_db_info[2]))
+
+            # 空数据库，验证能否获取到空的表清单
+            _collections = AsyncTools.sync_run_coroutine(self.driver.list_collections())
+            if len(_collections) > 0:
+                return (False, _tips, 'new database [%s] should not has tables %s' % (_db_info[0], str(_collections)))
+
             # 应自动切换到了新数据库, 创建空表
             AsyncTools.sync_run_coroutine(self.driver.create_collection('tb_null'))
 
@@ -3379,7 +3385,7 @@ class TestPgSQLDriver(unittest.TestCase):
 class TestMongoDriver(unittest.TestCase):
 
     def test(self):
-        # return
+        return
         # 初始化驱动
         _case = MongoDriverTestCase()
 

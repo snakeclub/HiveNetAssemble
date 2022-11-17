@@ -779,9 +779,10 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
         self._use_insert_many_generate_sqls = False
 
         # 公共参数处理
+        self._connect_config = copy.deepcopy(connect_config)
         self._driver_config = copy.deepcopy(driver_config)
-        self._default_str_len = connect_config.get('default_str_len', 30)
-        self._transaction_share_cursor = connect_config.get('transaction_share_cursor', True)
+        self._default_str_len = self._connect_config.pop('default_str_len', 30)
+        self._transaction_share_cursor = self._connect_config.pop('transaction_share_cursor', True)
         self._debug = self._driver_config.get('debug', False)
         self._ignore_index_error = self._driver_config.get('ignore_index_error', True)
         self._logger = driver_config.get('logger', None)
@@ -792,7 +793,7 @@ class NosqlAIOPoolDriver(NosqlDriverFW):
                 self._logger.setLevel(logging.DEBUG)
 
         # 获取数据库连接驱动及参数
-        _creator_infos = self._get_db_creator(connect_config, pool_config, driver_config)
+        _creator_infos = self._get_db_creator(self._connect_config, pool_config, driver_config)
         self._db_name = _creator_infos.get('current_db_name', None)
 
         # 连接池设置参数
