@@ -24,7 +24,7 @@ SHORT_DESCRIPTION = """
 A collection of Python libraries that are easy for developers to use.""".strip()
 
 DEPENDENCIES = [
-    'HiveNetCore==0.1.2',
+    'HiveNetCore==0.1.3',
     'HiveNetWebUtils==0.1.1',
     'HiveNetSimpleSanic==0.1.2',
     'HiveNetSimpleFlask==0.1.0',
@@ -39,7 +39,7 @@ DEPENDENCIES = [
 
 TEST_DEPENDENCIES = []
 
-VERSION = '0.1.2'
+VERSION = '0.1.3'
 URL = 'https://github.com/snakeclub/HiveNetAssemble'
 
 setup(
