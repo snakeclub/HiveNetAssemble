@@ -7,6 +7,16 @@ HiveNetAssemble 一组方便开发人员使用的Python库集合, 旨在让开�
 
 文档地址: https://hivenetassemble.readthedocs.io/zh_CN/latest/
 
+## 更新GitHub的Host文件的方法
+
+获取最新的Host信息：https://hosts.gitcdn.top/hosts.txt
+
+手动修改host文件：
+
+Linux / MacOS hosts 路径：/etc/hosts
+
+Windows hosts 路径：C:\Windows\System32\drivers\etc\hosts
+
 ## 项目维护命令
 
 **构建项目文档：**
@@ -51,16 +61,16 @@ twine upload dist/*-0.1.2.*
 ```shell
 # 安装包
 python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetCore"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetWebUtils"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetSimpleSanic"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetSimpleFlask"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetGRpc"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetPipeline"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetPromptPlus"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetConsole"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetFileTransfer"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetNoSql"
-python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetBuildTool"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetWebUtils "HiveNetWebUtils"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetSimpleSanic "HiveNetSimpleSanic"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetSimpleFlask "HiveNetSimpleFlask"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetGRpc "HiveNetGRpc"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetPipeline "HiveNetPipeline"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetPromptPlus "HiveNetPromptPlus"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetConsole "HiveNetConsole"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetFileTransfer "HiveNetFileTransfer"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetNoSql "HiveNetNoSql"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetBuildTool "HiveNetBuildTool"
 
 # 移除安装
 python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetCore
