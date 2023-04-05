@@ -45,7 +45,9 @@ class PythonEnvTools(object):
         @param {str} path - 包所在路径(包目录的上一级目录)
         """
         _site_packages_path = cls.get_site_packages_path()
-        _content = '# .pth file for the %s extensions\n%s' % (name, path)
+        _content = '# .pth file for the %s extensions\n%s' % (
+            name, os.path.abspath(path)
+        )
         _filename = '%s.pth' % name
 
         # 写入文件

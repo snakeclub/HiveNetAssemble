@@ -34,12 +34,12 @@ DEPENDENCIES = [
     'HiveNetConsole==0.1.0',
     'HiveNetFileTransfer==0.1.0',
     'HiveNetNoSql==0.1.0',
-    'HiveNetBuildTool==0.1.0'
+    'HiveNetBuildTool==0.1.1'
 ]
 
 TEST_DEPENDENCIES = []
 
-VERSION = '0.1.0'
+VERSION = '0.1.2'
 URL = 'https://github.com/snakeclub/HiveNetAssemble'
 
 setup(

@@ -7,4 +7,80 @@ HiveNetAssemble 一组方便开发人员使用的Python库集合, 旨在让开�
 
 文档地址: https://hivenetassemble.readthedocs.io/zh_CN/latest/
 
+## 项目维护命令
+
+**构建项目文档：**
+
+```shell
+# 进入文档目录
+cd docs/
+
+# 自动生成api文档索引
+./apidoc.sh
+
+# 构建html帮助文档
+make clean
+make html
+```
+
+**项目版本设置标签(版本为所有组件中最新的版本号)：**
+
+```shell
+# 为当前文档打上标签
+git tag -a v0.1.2 -m "HiveNetAssemble version 0.1.2"
+
+# 提交标签到git服务
+git push origin --tags
+```
+
+**打包并上传版本到Pypi：**
+
+```shell
+# 检查pip上的包版本清单
+pip show HiveNetAssemble
+
+# 执行打包处理
+python setup.py sdist
+
+# 上传到Pypi
+twine upload dist/*-0.1.2.*
+```
+
+**安装本地源码到python库（用于测试本地最新源码）**
+
+```shell
+# 安装包
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetCore"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetWebUtils"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetSimpleSanic"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetSimpleFlask"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetGRpc"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetPipeline"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetPromptPlus"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetConsole"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetFileTransfer"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetNoSql"
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -s HiveNetCore "HiveNetBuildTool"
+
+# 移除安装
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetCore
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetWebUtils
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetSimpleSanic
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetSimpleFlask
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetGRpc
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetPipeline
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetPromptPlus
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetConsole
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetFileTransfer
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetNoSql
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -r HiveNetBuildTool
+
+# 查看所安装的包路径是否准确, 获取库所在路径, 例如: /Users/lhj/miniforge3/lib/python3.9/site-packages
+python "HiveNetCore/HiveNetCore/utils/pyenv_tool.py" -g
+
+# 查看指定的安装路径
+view /Users/lhj/miniforge3/lib/python3.9/site-packages/HiveNetCore.pth
+
+```
+
 正在构建中...

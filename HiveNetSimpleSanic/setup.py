@@ -25,7 +25,7 @@ Simplifies the complexity of building restful API based on Sanic.""".strip()
 
 DEPENDENCIES = [
     'HiveNetCore>=0.1.2',
-    'HiveNetWebUtils',
+    'HiveNetWebUtils>=0.1.1',
     'sanic==21.12.1',
     'sanic-ext==21.12.1'
 ]

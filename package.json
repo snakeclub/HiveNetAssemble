@@ -1,6 +1,6 @@
 {
     "name": "HiveNetAssemble",
-    "version": "0.1.0",
+    "version": "0.1.2",
     "description": "HiveNet usefull library assembles",
     "main": "index.js",
     "scripts": {
