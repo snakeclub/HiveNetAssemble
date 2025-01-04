@@ -36,3 +36,6 @@ sanic-plugin-toolkit
 pycryptodome
 psutil
 aiohttp
+sphinx-autobuild
+sphinx_rtd_theme
+sphinx_bootstrap_theme
