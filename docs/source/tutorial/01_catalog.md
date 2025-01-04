@@ -1,10 +1,10 @@
-# HiveNetAssemble V0.1.0索引及版本
+# HiveNetAssemble V0.1.4索引及版本
 
 HiveNetAssemble是用于统一安装所有组件的集合库，由于组件的仍在不停迭代中，因此每个发布版本所包含的组件版本有所不同。当前文档说明每个组件的版本，以及建立文档连接索引。
 
 ## HiveNetCore
 
-版本： v0.1.2
+版本： v0.1.4
 
 [HiveNetCore总览](HiveNetCore/01_catalog.md)
 
@@ -18,7 +18,7 @@ HiveNetAssemble是用于统一安装所有组件的集合库，由于组件的�
 
 ## HiveNetSimpleSanic
 
-版本： v0.1.2
+版本： v0.1.3
 
 [HiveNetSimpleSanic总览](HiveNetSimpleSanic/01_catalog.md)
 
@@ -39,14 +39,14 @@ HiveNetAssemble是用于统一安装所有组件的集合库，由于组件的�
 
 ## HiveNetPipeline
 
-版本： v0.1.0
+版本： v0.1.1
 
 [HiveNetPipeline总览](HiveNetPipeline/01_catalog.md)
 
 
 ## HiveNetPromptPlus
 
-版本： v0.1.0
+版本： v0.1.1
 
 [HiveNetPromptPlus总览](HiveNetPromptPlus/01_catalog.md)
 
@@ -70,3 +70,9 @@ HiveNetAssemble是用于统一安装所有组件的集合库，由于组件的�
 版本： v0.1.0
 
 [HiveNetNoSql总览](HiveNetNoSql/01_catalog.md)
+
+## HiveNetBuildTool
+
+版本： v0.1.2
+
+[HiveNetBuildTool总览](HiveNetBuildTool/01_catalog.md)
