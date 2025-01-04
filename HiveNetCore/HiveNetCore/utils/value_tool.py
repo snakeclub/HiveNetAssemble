@@ -171,7 +171,7 @@ class ValueTool(object):
             return default_value
 
     @classmethod
-    def set_dict_value_by_path(cls, path: str, dict_obj: dict, set_value):
+    def set_dict_value_by_path(cls, path: str, dict_obj: dict, set_value, auto_create_key: bool = False):
         """
         设置字典指定路径的值
 
@@ -180,6 +180,8 @@ class ValueTool(object):
             注2: 可以通过[索引值]搜索特定key下第几个配置(数组或字典), 例如 'root/key1[0]'搜素key1下第一个对象
         @param {dict} dict_obj - 字典对象
         @param {Any} set_value - 要设置的值
+        @param {bool} auto_create_key=False - 是否自动创建不存在的Key
+            注: 自动创建的对象固定为dict
         """
         _last_obj = dict_obj
         _paths = path.split('/')
@@ -203,12 +205,20 @@ class ValueTool(object):
                     return
 
                 # 要继续往下搜索
+                if auto_create_key and _key not in _last_obj.keys():
+                    # 自动创建不存在的key
+                    _last_obj[_key] = dict()
+
                 _last_obj = _last_obj[_key]
 
                 # 没有位置索引, 继续下一个搜索循环
                 continue
 
             # 有位置索引的情况
+            if auto_create_key and _key not in _last_obj.keys():
+                # 自动创建不存在的key
+                _last_obj[_key] = dict()
+
             _last_obj = _last_obj[_key]
 
             # 逐级处理

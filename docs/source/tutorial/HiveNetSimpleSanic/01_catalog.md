@@ -36,6 +36,10 @@ PIPY安装：pip install HiveNetSimpleSanic
 
 1、为了支持异步处理，HiveNetSimpleSanic使用了nest_asyncio，由于nest_asyncio不支持uvloop，因此如果安装了该包，请卸载：pip uninstall uvloop
 
+2、HiveNetSimpleSanic是基于sanic 21.12.1版本开发，并未测试其他版本的兼容性，如果需要安装其他sanic版本运行，可以使用--no-deps方式安装，或完成HiveNetSimpleSanic安装后自行变更sanic版本。
+
+3、HiveNetSimpleSanic 0.1.3版本以上增加了对sanic 20.12.7版本的兼容代码，如果使用的是python3.6或python3.7，需要使用可以使用该sanic版本。
+
 
 ## 库模块大纲
 

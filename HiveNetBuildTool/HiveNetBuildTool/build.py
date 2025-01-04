@@ -140,9 +140,16 @@ class BuildPipeline(object):
 
         # 装载当前构建类型自有的管道插件
         if self._type_config.get('plugins', None) is not None:
-            Pipeline.load_plugins_by_path(
-                os.path.join(self._base_path, self._type_config['plugins'])
-            )
+            _plugins_paths = list()
+            if type(self._type_config['plugins']) == str:
+                _plugins_paths.append(self._type_config['plugins'])
+            else:
+                _plugins_paths = self._type_config['plugins']
+
+            for _plugins_path in _plugins_paths:
+                Pipeline.load_plugins_by_path(
+                    os.path.join(self._base_path, _plugins_path)
+                )
 
         # 装载管道插件的私有扩展参数
         _base_extend_para_file = os.path.abspath(os.path.join(

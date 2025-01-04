@@ -265,10 +265,10 @@ class Test(unittest.TestCase):
             },
             '4': {
                 "name": "SubPipeline",
-                "processor": "ProcesserSubPipeline",
+                "processor": "SubPipeline",
                 "is_sub_pipeline": True,
-                "sub_pipeline_para": {
-                    '1': {
+                "sub_pipeline_para": [
+                    {
                         "name": "Add100",
                         "processor": "ProcesserAdd",
                         "context": {'num': 100},
@@ -277,22 +277,22 @@ class Test(unittest.TestCase):
                         "exception_router": "",
                         "exception_router_para": {}
                     },
-                    '2': {
+                    {
                         "name": "Multiply2",
                         "processor": "ProcesserMultiply",
                         "context": {'num': 2}
                     },
-                    '3': {
+                    {
                         "name": "Add0-1",
                         "processor": "ProcesserAdd",
                         "context": {'num': 0}
                     },
-                    '4': {
+                    {
                         "name": "Add0-2",
                         "processor": "ProcesserAdd",
                         "context": {'num': 0}
                     }
-                }
+                ]
             },
             '5': {
                 "name": "Add3",

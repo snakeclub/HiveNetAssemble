@@ -1,11 +1,11 @@
 # 自定义构建配置文件示例
 # ******************************************
 # build: 构建参数（通用配置）
-# name: 当前构建的标识(仅用于区分不同构建配置)
-# type: 构建类型, 指定为HiveNetMicro
-# source: str, 构建源文件目录, 为当前构建配置文件所在目录的相对目录
-# output: str, 构建结果输出目录, 为当前构建配置文件所在目录的相对目录
-# successTips: list, 构建成功后的提示内容, 按行显示列表内容
+#   name: 当前构建的标识(仅用于区分不同构建配置)
+#   type: 构建类型, 指定为HiveNetMicro
+#   source: str, 构建源文件目录, 为当前构建配置文件所在目录的相对目录
+#   output: str, 构建结果输出目录, 为当前构建配置文件所在目录的相对目录
+#   successTips: list, 构建成功后的提示内容, 按行显示列表内容
 # ******************************************
 build:
   name: 'demo'
@@ -51,6 +51,23 @@ getSysInfos:
       default: '/?'
 
 # ******************************************
+# prompt: 获取交互输入
+# ******************************************
+prompt:
+  -
+    promptType: radio
+    values:
+      - ["val1", "text1"]
+      - ["val2", "text2"]
+    default: "val2"
+    setValuePath: "prompt/radio"
+  -
+    engine: PromptPlus
+    text: "input you word: "
+    default: "no"
+    setValuePath: "prompt/input"
+
+# ******************************************
 # print: 要打印的上下文信息
 #   Item Key: 打印步骤唯一标识
 #     showTips: str, 打印内容前的提示信息, 选填
@@ -64,9 +81,12 @@ print:
   sysPrint:
     showTips: 系统信息
     path: sysInfos/platform
-  envPring:
+  envPrint:
     showTips: 环境变量
     path: sysInfos/Home
+  contextPrint:
+    showTips: 输入结果
+    path: prompt
 
 # ******************************************
 # 自定义构建插件处理配置

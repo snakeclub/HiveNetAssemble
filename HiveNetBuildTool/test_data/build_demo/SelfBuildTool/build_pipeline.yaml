@@ -18,6 +18,12 @@
   context:
     current_key: getSysInfos
 "4":
+  name: Prompt
+  tips: 获取输入信息
+  processor: ProcesserBuildPrompt
+  context:
+    current_key: prompt
+"5":
   name: PrintContext
   tips: 打印信息
   processor: ProcesserBuildPrint

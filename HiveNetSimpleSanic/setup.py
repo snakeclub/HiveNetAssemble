@@ -32,7 +32,7 @@ DEPENDENCIES = [
 
 TEST_DEPENDENCIES = []
 
-VERSION = '0.1.2'
+VERSION = '0.1.3'
 URL = 'https://github.com/snakeclub/HiveNetAssemble/HiveNetSimpleSanic'
 
 setup(
@@ -57,7 +57,7 @@ setup(
     classifiers=[
         'Operating System :: OS Independent',
         'License :: OSI Approved :: Mozilla Public License 2.0 (MPL 2.0)',
-        'Programming Language :: Python :: 3.6',
+        'Programming Language :: Python :: 3.8',
         'Topic :: Software Development :: Libraries'
     ],
     # 此项需要, 否则卸载时报windows error

@@ -19,6 +19,16 @@ from HiveNetPipeline import PipelineProcesser
 class ProcesserBuildPrint(PipelineProcesser):
     """
     打印上下文指定信息
+
+    建议节点配置标识(current_key): print
+    配置说明:
+    Item Key: 打印步骤唯一标识
+        showTips: str, 打印内容前的提示信息, 选填
+        path: str, 要打印的上下文字典检索路径
+            注1: 从根目录开始搜索, 路径下多个key之间使用'/'分隔, 例如 'root/key1/key2'
+            注2: 可以通过[索引值]搜索特定key下第几个配置(数组或字典), 例如 'root/key1[0]'搜素key1下第一个对象
+        default: Any, 路径找不到时打印的默认值
+        jsonPrint: bool, 使用json方式打印(格式化后的显示), 默认为True
     """
 
     @classmethod

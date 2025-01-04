@@ -18,7 +18,18 @@ from HiveNetPipeline import PipelineProcesser
 
 class ProcesserBuildDir(PipelineProcesser):
     """
-    文件夹处理
+    文件夹处理(目录创建及文件复制)
+
+    建议节点配置标识(current_key): dirs
+    配置说明:
+    Item Key: 要在输出目录下创建的文件夹, 支持使用"/"创建多级文件夹
+        clear: bool, 文件夹已存在的情况是否清空目录, 默认为false
+        copy: list, 复制的文件或目录清单, 每项为一个复制操作, 支持以下两种配置方式
+            src_file: str, 直接传入要复制文件的路径(为源文件目录的相对目录), 直接复制到当前配置文件夹的根目录下
+            ["src_file", "dest_file"]: list, 第1个参数为要复制的文件路径, 第2个参数为要保存的文件路径(当前配置文件夹的相对路径)
+        copyAll: list, 要复制所有子文件及子文件夹的目录清单，每项为一个复制操作，支持以下两种配置方式
+            src_dir: str, 直接传入要复制的文件夹(为源文件目录的相对目录), 直接将该文件夹的所有子文件和子目录复制到当前配置文件夹的根目录下
+            ["src_dir", "dest_dir"]: list, 第1个参数为要复制文件夹, 第2个参数为要保存的文件夹(当前配置文件夹的相对路径)
     """
 
     @classmethod

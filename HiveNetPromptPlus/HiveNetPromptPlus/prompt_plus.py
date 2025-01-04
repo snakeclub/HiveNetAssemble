@@ -14,6 +14,7 @@
 @file prompt_plus.py
 """
 import os
+import re
 import sys
 import threading
 import traceback
@@ -1337,6 +1338,19 @@ class PromptPlus(object):
             return deal_fun(_prompt_text)
         else:
             return _prompt_text
+
+    @staticmethod
+    def prompt(message: str = '', default: str = '', is_password: bool = False, **kwargs) -> str:
+        """
+        获取一次输入
+
+        @param {str} message='' - 获取输入的提示信息
+        @param {str} default='' - 默认值
+        @param {bool} is_password=False - 是否密码
+
+        @returns {str} - 返回获取到的值
+        """
+        return prompt(message=message, default=default, is_password=is_password, **kwargs)
 
     @staticmethod
     def confirm(message: str = 'Confirm?', suffix: str = " (y/n) ") -> bool:

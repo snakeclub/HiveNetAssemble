@@ -19,7 +19,16 @@ from HiveNetBuildTool.build import BuildPipeline
 
 class ProcesserBuildGetSysInfos(PipelineProcesser):
     """
-    获取系统信息
+    获取系统信息(获取并放置到管道上下文的配置)
+
+    建议节点配置标识(current_key): getSysInfos
+    配置说明:
+    Item Key: 获取信息唯一标识(自定义)
+        infoType: str, 信息类型标识(extend_para.yaml中ProcesserGetSysInfos下的信息类型)
+            注: 如果不设置代表使用Item Key作为信息类型标识
+        getKey: str, 自定义写入上下文的信息获取key, 如果不设置则使用extend_para.yaml中对应信息类型的默认值
+        args: list, 调用获取信息函数的固定位置入参, 根据实际extend_para.yaml中对应信息类型的获取函数要求传参
+        kwargs: dict, 调用获取信息函数的key-value入参, 根据实际extend_para.yaml中对应信息类型的获取函数要求传参
     """
 
     @classmethod

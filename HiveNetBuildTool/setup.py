@@ -24,13 +24,14 @@ SHORT_DESCRIPTION = """
 A universal code building tool.""".strip()
 
 DEPENDENCIES = [
-    'HiveNetPipeline>=0.1.0',
+    'HiveNetCore>=0.1.4'
+    'HiveNetPipeline>=0.1.1',
 ]
 
 
 TEST_DEPENDENCIES = []
 
-VERSION = '0.1.1'
+VERSION = '0.1.2'
 URL = 'https://github.com/snakeclub/HiveNetAssemble/HiveNetBuildTool'
 
 setup(

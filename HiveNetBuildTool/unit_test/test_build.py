@@ -47,7 +47,7 @@ class TestBuildPipeline(unittest.TestCase):
             os.path.dirname(__file__), os.path.pardir, 'test_data/build_demo'
         ))
         _build_file = os.path.join(_demo_path, 'build_src/build.yaml')
-        _base_path = os.path.join(_demo_path, 'SeflBuildTool')
+        _base_path = os.path.join(_demo_path, 'SelfBuildTool')
         _build_pipeline = BuildPipeline(_base_path, build_file=_build_file)
         self.assertTrue(
             _build_pipeline.start_build(), '构建出错'

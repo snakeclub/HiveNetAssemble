@@ -24,7 +24,12 @@ from typing import Callable
 from inspect import isasyncgen, isawaitable, isgenerator
 from sanic import Sanic
 from sanic.response import HTTPResponse, text, json, stream
-from sanic_ext import Extend
+# 兼容Python3.6
+USE_SANIC_EXT = True
+try:
+    from sanic_ext import Extend
+except:
+    USE_SANIC_EXT = False
 from HiveNetCore.generic import CResult
 from HiveNetCore.i18n import _
 from HiveNetCore.utils.exception_tool import ExceptionTool
@@ -644,10 +649,12 @@ class SanicServer(ServerBaseFW):
             # 不开启文档生成
             self._app.config.OAS = False
 
-        Extend(self._app)
+        # 兼容Python3.6的代码
+        if USE_SANIC_EXT:
+            Extend(self._app)
 
-        # 日志对象的处理
-        self._app.ctx.logger = self._logger
+            # 日志对象的处理
+            self._app.ctx.logger = self._logger
 
         # 内部控制参数
         self._thread = None  # 正在运行的线程对象
@@ -688,8 +695,8 @@ class SanicServer(ServerBaseFW):
         启动服务器的线程函数
         """
         try:
-            # 判断是否已有路由, 如果没有则添加默认路由(否则无法正常启动)
-            if len(self._app.router.routes) == 0:
+            # 判断是否已有路由, 如果没有则添加默认路由(否则无法正常启动), 增加对Python 3.6的支持
+            if USE_SANIC_EXT and len(self._app.router.routes) == 0:
                 AsyncTools.sync_run_coroutine(
                     self.add_service(
                         '/', self.default_index_handler, name=self._app_name + '.default_index_handler'

@@ -21,6 +21,7 @@ import inspect
 import datetime
 import threading
 import traceback
+from typing import List
 import uuid
 from collections import OrderedDict
 from HiveNetCore.utils.run_tool import RunTool, AsyncTools
@@ -385,9 +386,12 @@ class Pipeline(object):
         构造函数
 
         @param {str} name - 管道名称
-        @param {str|dict} pipeline_config - 管道配置json字符串(也支持传入字典), 注意节点顺序必须是从1开始的连续整数
-            {
-                "1": {
+        @param {str|dict|list} pipeline_config - 管道配置, 支持传入3种类型:
+            str - json字符(可以是字典模式或数组模式)
+            dict - 配置字典, 例如{"1": {节点1配置}, "2": {节点2配置}, ...}, 注意节点顺序必须是从1开始的连续整数
+            list - 配置数组, 例如[{节点1配置}, {节点2配置}, ...], 比字典模式简单, 会自动生成连续的节点顺序
+               注: 节点配置说明如下
+               {
                     "name": "节点配置名",
                     "predealer": "预处理器名",  # 在正式执行节点前先执行预处理器, 预处理器的返回值可以控制是否跳过当前节点, 置空代表不执行预处理
                     "predealer_execute_para": {},  # 预处理器执行的传入参数, 作为**kwargs传入预处理器, 置空或不设置值的情况传入{}
@@ -400,12 +404,7 @@ class Pipeline(object):
                     "router_para": {}, # 路由器的传入参数, 作为**kwargs传入路由器, 置空或不设置值的情况传入{}
                     "exception_router": "", 执行处理器出现异常时执行的路由器名, 置空或不设置值将抛出异常并结束管道执行
                     "exception_router_para": {}  # 异常路由器的传入参数,  作为**kwargs传入路由器, 置空或不设置值的情况传入{}
-                },
-                "2": {
-                    ...
-                },
-                ...
-            }
+                }
         @param {bool} is_asyn=False - 是否异步返回结果
         @param {function} asyn_notify_fun=None - 异步结果通知函数, 格式如下:
             fun(name, run_id, status, context, output, pipeline)
@@ -438,10 +437,25 @@ class Pipeline(object):
         """
         self.logger = logger
         self.name = name
+
+        # 处理节点配置参数
+        _temp_pipeline = None
         if type(pipeline_config) == str:
-            self.pipeline = json.loads(pipeline_config)
+            _temp_pipeline = json.loads(pipeline_config)
         else:
-            self.pipeline = pipeline_config
+            _temp_pipeline = copy.deepcopy(pipeline_config)
+
+        if isinstance(_temp_pipeline, (frozenset, list, set, tuple,)):
+            # 数组处理
+            self.pipeline = dict()
+            _current_index = 1
+            for _node_config in pipeline_config:
+                self.pipeline[str(_current_index)] = _node_config
+                _current_index += 1
+        else:
+            self.pipeline = _temp_pipeline
+
+        # 其他参数设置
         self.is_asyn = is_asyn  # 是否异步
         self.asyn_notify_fun = asyn_notify_fun  # 异步结果通知函数
         self.running_notify_fun = running_notify_fun

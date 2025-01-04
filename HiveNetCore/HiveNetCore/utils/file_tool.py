@@ -54,8 +54,12 @@ class FileTool(object):
     """
     文件处理工具
     提供各类文件、目录相关的常用工具函数(静态方法)
-
     """
+
+    #############################
+    # 文件处理相关
+    #############################
+
     @staticmethod
     def is_file_in_subdir(file: str, dir: str) -> bool:
         """
@@ -182,6 +186,68 @@ class FileTool(object):
 
         """
         return os.path.split(os.path.realpath(file))[0]
+
+    @staticmethod
+    def remove_file(filename):
+        """
+        删除指定文件
+
+        @param {string} filename - 需要删除的文件路径
+
+        @throws {FileNotFoundError} - 路径不是文件或文件不存在时抛出该异常
+        @throws {PermissionError} - 没有权限时抛出该异常
+
+        """
+        if os.path.isfile(filename):
+            os.remove(filename)
+        else:
+            raise FileNotFoundError
+
+    @classmethod
+    def copy_file(cls, src_file: str, dest_file: str, overwrite: bool = False):
+        """
+        复制文件到指定目录
+
+        @param {str} src_file - 源文件
+        @param {str} dest_file - 目标文件
+        @param {bool} overwrite=False - 文件已存在的情况下是否覆盖
+        """
+        if os.path.exists(dest_file):
+            # 文件已存在
+            if not overwrite:
+                raise FileExistsError('file exists: %s' % dest_file)
+        else:
+            # 文件不存在, 先创建目录
+            _path, _file_name = os.path.split(dest_file)
+            cls.create_dir(_path, exist_ok=True)
+
+        # 真正执行复制处理
+        shutil.copyfile(src_file, dest_file)
+
+    @classmethod
+    def move_file(cls, src_file: str, dest_file: str, overwrite: bool = False):
+        """
+        移动文件
+
+        @param {str} src_file - 源文件
+        @param {str} dest_file - 目标文件
+        @param {bool} overwrite=False - 文件已存在的情况下是否覆盖
+        """
+        if os.path.exists(dest_file):
+            # 文件已存在
+            if not overwrite:
+                raise FileExistsError('file exists: %s' % dest_file)
+        else:
+            # 文件不存在, 先创建目录
+            _path, _file_name = os.path.split(dest_file)
+            cls.create_dir(_path, exist_ok=True)
+
+        # 真正执行移动处理
+        shutil.move(src_file, dest_file)
+
+    #############################
+    # 目录处理相关
+    #############################
 
     @staticmethod
     def get_dir_name(path):
@@ -317,22 +383,6 @@ class FileTool(object):
             shutil.rmtree(path=path, ignore_errors=False)
 
     @staticmethod
-    def remove_file(filename):
-        """
-        删除指定文件
-
-        @param {string} filename - 需要删除的文件路径
-
-        @throws {FileNotFoundError} - 路径不是文件或文件不存在时抛出该异常
-        @throws {PermissionError} - 没有权限时抛出该异常
-
-        """
-        if os.path.isfile(filename):
-            os.remove(filename)
-        else:
-            raise FileNotFoundError
-
-    @staticmethod
     def remove_sub_dirs(path='', regex_str=''):
         """
         删除指定目录下的子目录(及子目录下的文件和目录)
@@ -444,27 +494,6 @@ class FileTool(object):
                 FileTool.copy_all_with_path(
                     src_path=_full_filename, dest_path=_full_destname, exist_ok=exist_ok
                 )
-
-    @classmethod
-    def copy_file(cls, src_file: str, dest_file: str, overwrite: bool = False):
-        """
-        复制文件到指定目录
-
-        @param {str} src_file - 源文件
-        @param {str} dest_file - 目标文件
-        @param {bool} overwrite=False - 文件已存在的情况下是否覆盖
-        """
-        if os.path.exists(dest_file):
-            # 文件已存在
-            if not overwrite:
-                raise FileExistsError('file exists: %s' % dest_file)
-        else:
-            # 文件不存在, 先创建目录
-            _path, _file_name = os.path.split(dest_file)
-            cls.create_dir(_path, exist_ok=True)
-
-        # 真正执行复制处理
-        shutil.copyfile(src_file, dest_file)
 
     #############################
     # 文件内容处理
